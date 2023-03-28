@@ -10,6 +10,8 @@ __status__ = "Production"
 #   pyserial    3.5
 
 import serialCom
+import matrix
+import GUI
 
 
 def main():
