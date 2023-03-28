@@ -14,7 +14,8 @@ import serialCom
 
 def main():
     print("Hello World!")
-    serialCom.initiateSerial()
+    print(serialCom.serial_ports())
+    serialCom.initiate_Serial()
 
 if __name__ == "__main__":
     main()
