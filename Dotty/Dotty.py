@@ -6,7 +6,7 @@ __version__ = "0.0"
 __email__ = "chasefiore@gmail.com"
 __status__ = "Production"
 
-
+import serialCom
 
 def main():
     print("Hello World!")
