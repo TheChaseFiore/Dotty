@@ -2,14 +2,12 @@
 
 import serial
 
-
-
-class initiateSerial(object):
+class initiateSerial():
     rs232 = serial.Serial('/dev/ttyUSB0')  # open serial port
     print(rs232.name)         # check which port was really used
     rs232.write(b'hello')     # write a string
     rs232.close()             # close port
-    pass
+    print("woot")
 
 
 

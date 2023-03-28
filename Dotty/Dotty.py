@@ -6,11 +6,15 @@ __version__ = "0.0"
 __email__ = "chasefiore@gmail.com"
 __status__ = "Production"
 
+#   Package     Version
+#   pyserial    3.5
+
 import serialCom
 
 
 def main():
     print("Hello World!")
+    serialCom.initiateSerial()
 
 if __name__ == "__main__":
     main()
