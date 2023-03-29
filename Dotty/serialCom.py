@@ -35,12 +35,22 @@ def serial_ports():
 
 
 def initiate_Serial():
-    rs232 = serial.Serial('COM1')  # open serial port
+    rs232 = serial.Serial('COM2',57600)  # open serial port
     print(rs232.name)         # check which port was really used
-    rs232.write(b'hello')     # write a string
-    rs232.close()             # close port
-    print("woot")
+    return rs232
 
+
+def refresh(panels, rs232, panel=255):
+    output = bytearray(b'0x80')
+    output.append(panels.panel[panel].address)
+    for row in panels.panel[panel].dots:
+        dotbuffer = "0"
+        for dot in row:
+            dotbuffer += str(int(dot))
+        output.append(bytearray(dotbuffer,'utf-8'))
+    output.append(b'0x8F')
+    print(output)
+    rs232.write(output,32)
 
 
 

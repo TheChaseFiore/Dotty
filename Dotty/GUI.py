@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 
-from tkinter import *
+import tkinter as tk
 
-root = Tk()
+root = tk.Tk()
 
-root.geometry("300x150") #frame size
+root.geometry("800x500") #frame size
+root.title("Dotty") #frame title
+root.grid()
+root.configure(background="#1d1e26")
+
+
+root.mainloop()
 
 
 
