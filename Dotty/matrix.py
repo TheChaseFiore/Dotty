@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 
-import numpy as np
 
 class panel:
     def __init__(self,address):
-        self.address = address.to_bytes(1,"big")
-        self.dots = np.zeros( (28,7) ) #creat blank matrix
-
+        self.address = bytearray(address.to_bytes(1))
+        array = bytearray()
+        for ct in range(28):
+            array.append(0)
+        self.rows = array
 
 class matrix:
     def __init__(self,panelCt):
         self.panel = []
         for makePanel in range(panelCt):
             self.panel.append(panel(makePanel)) #create matrix of panels with assigned addresses
-    pass
 

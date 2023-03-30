@@ -41,16 +41,17 @@ def initiate_Serial():
 
 
 def refresh(panels, rs232, panel=255):
-    output = bytearray(b'0x80')
-    output.append(panels.panel[panel].address)
-    for row in panels.panel[panel].dots:
-        dotbuffer = "0"
-        for dot in row:
-            dotbuffer += str(int(dot))
-        output.append(bytearray(dotbuffer,'utf-8'))
-    output.append(b'0x8F')
+    output = bytearray() 
+    output.append(128) #header
+    output.append(131) #command
+    if panel != 255:
+        output.extend(panels.panel[panel].address) #address
+    else:
+        output.append(255) #send data to all (blanking)
+    output.extend(panels.panel[panel].rows) #data
+    output.append(143) #end
     print(output)
-    rs232.write(output,32)
+    rs232.write(output)
 
 
 

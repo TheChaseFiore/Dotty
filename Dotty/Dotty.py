@@ -22,7 +22,9 @@ def main():
     rs232 = serialCom.initiate_Serial()
     panels = matrix.matrix(4)
     print(panels.panel[0].address)
-    serialCom.refresh(panels, rs232, 0)
+    while True:
+        serialCom.refresh(panels, rs232, 2)
+    serialCom.refresh(panels, rs232, 2)
 
 if __name__ == "__main__":
     main()
