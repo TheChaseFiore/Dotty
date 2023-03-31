@@ -18,9 +18,9 @@ import global_var
 
 
 def main():
+    global_var.init()
     print("Hello World!")
     print(serial_port.serial_ports())
-    print(panels.panel[0].address)
     while True:
         serial_port.refresh(2)
     serial_port.refresh(2)
