@@ -40,7 +40,7 @@ def initiate_Serial():
     return rs232
 
 
-def refresh(panels, rs232, panel=255):
+def refresh(panel=255):
     output = bytearray() 
     output.append(128) #header
     output.append(131) #command

@@ -13,18 +13,17 @@ __status__ = "Production"
 
 import serialCom
 import matrix
+import Global
 #import GUI
 
 
 def main():
     print("Hello World!")
     print(serialCom.serial_ports())
-    rs232 = serialCom.initiate_Serial()
-    panels = matrix.matrix(4)
     print(panels.panel[0].address)
     while True:
-        serialCom.refresh(panels, rs232, 2)
-    serialCom.refresh(panels, rs232, 2)
+        serialCom.refresh(2)
+    serialCom.refresh(2)
 
 if __name__ == "__main__":
     main()
