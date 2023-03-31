@@ -2,10 +2,8 @@
 
 import sys
 import glob
-#import serial
+import serial
 import global_var
-
-import os, pty, serial
 
 def serial_ports():
     """ Lists serial port names
@@ -34,17 +32,6 @@ def serial_ports():
         except (OSError, serial.SerialException):
             pass
     return result
-
-
-def initiate_serial():
-    master, slave = pty.openpty()
-    s_name = os.ttyname(slave)
-    rs232 = serial.Serial(s_name,57600)
-
-
-    #rs232 = serial.Serial('COM2',57600)  # open serial port
-    print(rs232.name)         # check which port was really used
-    return rs232
 
 
 def refresh(panel=255):

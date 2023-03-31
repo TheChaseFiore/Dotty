@@ -8,7 +8,7 @@ class panel:
         self.address.append(address)
         array = bytearray()
         for ct in range(28):
-            array.extend(bx00)
+            array.extend(b'0x00')
         self.rows = array
 
 class matrix:
