@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import global_var
 
 class panel:
     def __init__(self,address):

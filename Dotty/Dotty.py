@@ -11,19 +11,19 @@ __email__ = "chasefiore@gmail.com"
 __status__ = "Production"
 
 
-import serialCom
+import serial_port
 import matrix
-import Global
-#import GUI
+import global_var
+#import gui
 
 
 def main():
     print("Hello World!")
-    print(serialCom.serial_ports())
+    print(serial_port.serial_ports())
     print(panels.panel[0].address)
     while True:
-        serialCom.refresh(2)
-    serialCom.refresh(2)
+        serial_port.refresh(2)
+    serial_port.refresh(2)
 
 if __name__ == "__main__":
     main()

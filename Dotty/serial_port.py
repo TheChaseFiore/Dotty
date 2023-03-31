@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-import serial
 import sys
 import glob
+import serial
+import global_var
 
 
 def serial_ports():
@@ -34,14 +35,14 @@ def serial_ports():
     return result
 
 
-def initiate_Serial():
+def initiate_serial():
     rs232 = serial.Serial('COM2',57600)  # open serial port
     print(rs232.name)         # check which port was really used
     return rs232
 
 
 def refresh(panel=255):
-    output = bytearray() 
+    output = bytearray()
     output.append(128) #header
     output.append(131) #command
     if panel != 255:
@@ -52,6 +53,3 @@ def refresh(panel=255):
     output.append(143) #end
     print(output)
     rs232.write(output)
-
-
-
