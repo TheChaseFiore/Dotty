@@ -4,6 +4,7 @@ import globals
 import sys
 import glob
 import serial
+import os, pty #delete
 
 def serial_ports():
     """ Lists serial port names
@@ -42,15 +43,26 @@ def initiate_serial():
     print(rs232.name)         # check which port was really used
     return rs232
 
-def refresh(panel=255):
-    output = bytearray()
-    output.append(128) #header
-    output.append(131) #command
-    if panel != 255:
-        output.extend(panels.panel[panel].address) #address
+def refresh(panels,flagged=True):
+    if flagged == True:
+        for panel in panels.panel:
+            if panel.updateFlag:
+                output = bytearray()
+                output.append(128) #header
+                output.append(131) #command
+                output.extend(panel.address) #address
+                output.extend(panel.rows) #data
+                output.append(143) #end
+                print(output)
+                #rs232.write(output)
+                panel.updateFlag=False
     else:
-        output.append(255) #send data to all (blanking)
-    output.extend(panels.panel[panel].rows) #data
-    output.append(143) #end
-    print(output)
-    rs232.write(output)
+        for panel in panels.panel:
+            output = bytearray()
+            output.append(128) #header
+            output.append(131) #command
+            output.extend(panel.address) #address
+            output.extend(panels.rows) #data
+            output.append(143) #end
+            print(output)
+            #rs232.write(output)

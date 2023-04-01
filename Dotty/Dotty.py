@@ -13,17 +13,24 @@ __status__ = "Production"
 
 import serial_port
 import matrix
-import global_var
+import globals
 #import gui
 
+globals.init()
+rs232 = serial_port.initiate_serial() #initiate serial com2
+panels = matrix.matrix(4) #make matrix with X panels
 
 def main():
-    global_var.init()
     print("Hello World!")
     print(serial_port.serial_ports())
-    while True:
-        serial_port.refresh(2)
-    serial_port.refresh(2)
+
+    panels.draw(7,5)
+    refresh()
+    panels.draw(27,5)
+    refresh()
+
+def refresh(flaggs=True):
+    serial_port.refresh(panels,flaggs)
 
 if __name__ == "__main__":
     main()
