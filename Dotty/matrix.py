@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import Global
 
 class panel:
     def __init__(self,address):
@@ -8,11 +9,11 @@ class panel:
         self.address.append(address)
         array = bytearray()
         for ct in range(28):
-            array.extend(b'0x00')
+            array.extend(bx00)
         self.rows = array
 
 class matrix:
-    def __init__(self,panelCt):
+    def __init__(self,panelCt=4):
         self.panel = []
         for makePanel in range(panelCt):
             self.panel.append(panel(makePanel)) #create matrix of panels with assigned addresses
