@@ -24,9 +24,12 @@ def main():
     print("Hello World!")
     print(serial_port.serial_ports())
 
-    panels.draw(7,5)
+    panels.draw(2,1)
     refresh()
-    panels.draw(27,5)
+    panels.draw(27,28)
+    panels.draw(28,28)
+    refresh()
+    panels.invert()
     refresh()
 
 def refresh(flaggs=True):

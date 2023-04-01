@@ -34,15 +34,17 @@ class matrix:
         pass
 
     def draw(self,x,y,color=1):
-        panelNum = int(x/7)
-        byteNum = x%7
+        panelNum = int((x-1)/7)
+        byteNum = 6-((x-1)%7)
+        print(byteNum)
         if color == 1:
-            self.panel[panelNum].rows[y] = set_bit_on(self.panel[panelNum].rows[y],byteNum)
+            self.panel[panelNum].rows[y-1] = set_bit_on(self.panel[panelNum].rows[y-1],byteNum)
         else:
-            self.panel[panelNum].rows[y] = set_bit_off(self.panel[panelNum].rows[y],byteNum)
+            self.panel[panelNum].rows[y-1] = set_bit_off(self.panel[panelNum].rows[y-1],byteNum)
         self.panel[panelNum].updateFlag = True
 
 def set_bit_on(value, bit_index):
+    print(value | (1 << bit_index))
     return value | (1 << bit_index)
 
 def set_bit_off(value, bit_index):
