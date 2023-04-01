@@ -2,6 +2,7 @@
 #   Package     Version
 #   pyserial    3.5
 #   numpy       1.24.2
+#   bitarray    2.7.3
 
 __author__ = "Chase Fiore"
 __copyright__ = "Copyright 2023, Chase Fiore"
@@ -13,22 +14,22 @@ __status__ = "Production"
 
 import serial_port
 import matrix
-import globals
 #import gui
 
-globals.init()
-rs232 = serial_port.initiate_serial() #initiate serial com2
-panels = matrix.matrix(4) #make matrix with X panels
+
 
 def main():
-    print("Hello World!")
-    print(serial_port.serial_ports())
+    global rs232, panels
+    rs232 = serial_port.initiate_serial() #initiate serial com2
+    panels = matrix.matrix(4) #make matrix with X panels
 
-    panels.draw(2,1)
+
+
+    panels.draw(1,1)
     refresh()
-    panels.draw(27,28)
     panels.draw(28,28)
     refresh()
+    print("refresh")
     panels.invert()
     refresh()
 
