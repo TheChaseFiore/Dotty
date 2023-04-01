@@ -3,8 +3,6 @@ import matrix
 import serialCom
 
 def init():
-  global rs232
+  global rs232, panels
   rs232 = serialCom.initiate_Serial() #initiate serial com2
-  
-  global panels
   panels = matrix.matrix(4) #make matrix with X panels

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import Global
+import global_var
 
 class panel:
     def __init__(self,address):
@@ -9,7 +9,7 @@ class panel:
         self.address.append(address)
         array = bytearray()
         for ct in range(28):
-            array.extend(bx00)
+            array.append(0)
         self.rows = array
 
 class matrix:
