@@ -18,6 +18,7 @@ class matrix:
         self.panel = []
         for makePanel in range(panelCt):
             self.panel.append(panel(makePanel)) #create matrix of panels with assigned addresses
+        return None
     def len(self):
         return len(self.panel)
 
