@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 #   Package     Version
 #   pyserial    3.5
-#   numpy       1.24.2
-#   bitarray    2.7.3
 
 __author__ = "Chase Fiore"
 __copyright__ = "Copyright 2023, Chase Fiore"
@@ -25,9 +23,9 @@ def main():
 
 
 
-    panels.draw(1,1)
+    panels.draw(1,5)
     refresh()
-    panels.draw(28,28)
+    panels.draw(19,28)
     refresh()
     print("refresh")
     panels.invert()

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import globals
 import sys
 import glob
 import serial
@@ -62,7 +61,8 @@ def refresh(panels,flagged=True):
             output.append(128) #header
             output.append(131) #command
             output.extend(panel.address) #address
-            output.extend(panels.rows) #data
+            output.extend(panel.rows) #data
             output.append(143) #end
             print(output)
             #rs232.write(output)
+            panel.updateFlag=False

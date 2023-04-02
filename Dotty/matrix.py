@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-from bitarray import bitarray
+
+global blp #byte look up
+blu = [0,6,5,4,3,2,1]
 
 class panel:
     def __init__(self,address):
         self.updateFlag = True
         if address >= 1:
             address += 1
-        self.address = address.to_bytes(1,'big')
-        self.rows = [0] * 28
-        self.rows = bytearray(self.rows)
+        self.address = address.to_bytes(1,byteorder='big',signed=False)
+        self.rows = bytearray(28)
     def len(self):
         return len(self.rows)
 
@@ -33,10 +34,7 @@ class matrix:
     def draw(self,x,y,color=1):
         y -= 1
         panelNum = x//8
-        byteNum = 7-(x%7)
-        if x%7 == 0:
-            byteNum = 0
-        print(panelNum," - ",y," - ",byteNum)
+        byteNum = blu[x%7]
         if color == 1:
             self.panel[panelNum].rows[y] = set_bit_on(self.panel[panelNum].rows[y],byteNum)
         else:
@@ -44,7 +42,6 @@ class matrix:
         self.panel[panelNum].updateFlag = True
 
 def set_bit_on(value, bit_index):
-    print(value," -- ",bit_index)
     return value | (1 << bit_index)
 
 def set_bit_off(value, bit_index):
