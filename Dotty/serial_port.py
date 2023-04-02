@@ -4,6 +4,7 @@ import sys
 import glob
 import serial
 import os, pty #delete
+import binascii
 
 def serial_ports():
     """ Lists serial port names
@@ -43,26 +44,14 @@ def initiate_serial():
     return rs232
 
 def refresh(panels,flagged=True):
-    if flagged == True:
-        for panel in panels.panel:
-            if panel.updateFlag:
-                output = bytearray()
-                output.append(128) #header
-                output.append(131) #command
-                output.extend(panel.address) #address
-                output.extend(panel.rows) #data
-                output.append(143) #end
-                print(output)
-                #rs232.write(output)
-                panel.updateFlag=False
-    else:
-        for panel in panels.panel:
+    for panel in panels.panel:
+        if panel.updateFlag or flagged == False :
             output = bytearray()
             output.append(128) #header
             output.append(131) #command
             output.extend(panel.address) #address
             output.extend(panel.rows) #data
             output.append(143) #end
-            print(output)
+            print(binascii.hexlify(output))
             #rs232.write(output)
             panel.updateFlag=False

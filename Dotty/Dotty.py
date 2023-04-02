@@ -14,26 +14,23 @@ import serial_port
 import matrix
 import time, os
 #import gui
-from multiprocessing import Process
+from multiprocessing import Process, Array
 
 
 
 def main():
-
-    panels.draw(1,5)
-    refresh()
-    panels.draw(19,28)
-    refresh()
-    print("refresh")
-    panels.invert()
-    refresh()
+    for y in range(28):
+        for x in range(28):
+            panels.draw(x,y)
+            print(x,"-",y)
+            time.sleep(.1)
 
 def refresh(flaggs=True):
     serial_port.refresh(panels,flaggs)
 
 def getTime():
     clock = time.localtime()
-    print(clock.tm_hour,":",clock.tm_min,":",clock.tm_sec," - ",clock.tm_zone)
+    #print(clock.tm_hour,":",clock.tm_min,":",clock.tm_sec," - ",clock.tm_zone)
 
 def fps():
     while True:
@@ -47,10 +44,10 @@ if __name__ == "__main__":
     time.tzset()
     clock = time.localtime()
     rs232 = serial_port.initiate_serial() #initiate serial com2
-    panels = matrix.matrix(4) #make matrix with X panels
+    panels = Array(matrix.matrix(4),4) #make matrix with X panels
 
-    p = Process(target=fps)
+    p = Process(target=fps,args=panels)
     p.start()
 
-    p2 = Process(target=main)
+    p2 = Process(target=main,args=panels)
     p2.start()

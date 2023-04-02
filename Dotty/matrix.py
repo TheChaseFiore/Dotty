@@ -24,9 +24,9 @@ class matrix:
 
     def invert(self):
         for panel in self.panel:
-            for byte in panel.rows:
-                byte = ~byte & 255 #invert all bits
-                byte = set_bit_off(byte,7)
+            for ct in range(28):
+                panel.rows[ct] = ~panel.rows[ct] & 255 #invert all bits
+                panel.rows[ct] = set_bit_off(panel.rows[ct],7)
                 panel.updateFlag = True
 
     def clear(self,color=1):
@@ -35,9 +35,9 @@ class matrix:
     def draw(self,x,y,color=1):
         y -= 1
         panelNum = x//8
-        byteNum = blu[x%7]
+        byteNum = blu[x % 7] #byte look up
         if color == 1:
-            self.panel[panelNum].rows[y] = set_bit_on(self.panel[panelNum].rows[y],byteNum)
+            self.panel[panelNum].rows[y] = set_bit_on(self.panel[panelNum].rows[y],bit_index=byteNum)
         else:
             self.panel[panelNum].rows[y] = set_bit_off(self.panel[panelNum].rows[y],byteNum)
         self.panel[panelNum].updateFlag = True
