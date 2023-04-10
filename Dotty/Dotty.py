@@ -10,8 +10,7 @@ __email__ = "chasefiore@gmail.com"
 __status__ = "Production"
 
 
-import serial_port
-import matrix
+import serial_port, matrix, video
 import time, os
 import random
 #import gui
@@ -44,11 +43,15 @@ def main():
             color = random.randint(0,1)
             panels.draw(x,y,color)
         refresh()
-    while True:
+
+    while 1==2:
         chat = input("Text")
         panels.clear()
         panels.drawTxt(chat , 14)
         refresh()
+
+    while True:
+
 
 def refresh(flaggs=True):
     serial_port.refresh(panels,rs232,flaggs)
