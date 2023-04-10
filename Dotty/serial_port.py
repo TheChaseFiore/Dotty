@@ -3,7 +3,6 @@
 import sys
 import glob
 import serial
-import os, pty #delete
 import binascii
 
 def serial_ports():
@@ -35,23 +34,16 @@ def serial_ports():
     return result
 
 def initiate_serial():
-    master, slave = pty.openpty()
-    s_name = os.ttyname(slave)
-    rs232 = serial.Serial(s_name,57600)
-
-    #rs232 = serial.Serial('COM2',57600)  # open serial port
+    rs232 = serial.Serial('COM2',57600)  # open serial port
     print(rs232.name)         # check which port was really used
     return rs232
 
-def refresh(panels,flagged=True):
+def refresh(panels,rs232,flagged=True):
     for panel in panels.panel:
-        if panel.updateFlag or flagged == False :
-            output = bytearray()
-            output.append(128) #header
-            output.append(131) #command
+        if panel.updateFlag or flagged == False:
+            output = bytearray([128,131])
             output.extend(panel.address) #address
             output.extend(panel.rows) #data
             output.append(143) #end
-            print(binascii.hexlify(output))
-            #rs232.write(output)
+            rs232.write(output)
             panel.updateFlag=False
