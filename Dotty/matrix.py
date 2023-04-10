@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import txt_to_px
+
 global blp #byte look up
 blu = [6,5,4,3,2,1,0]
 alu = [0,2,3,5]
@@ -30,7 +32,9 @@ class matrix:
                 panel.updateFlag = True
 
     def clear(self,color=1):
-        pass
+        for panel in self.panel:
+            panel.rows = bytearray(28)
+            panel.updateFlag = True
 
     def draw(self,x,y,color=1):
         panelNum = x//7
@@ -41,8 +45,16 @@ class matrix:
             self.panel[panelNum].rows[y] = set_bit_off(self.panel[panelNum].rows[y],byteNum)
         self.panel[panelNum].updateFlag = True
 
+    def drawTxt(self,txt,size=14):
+        array = txt_to_px.char_to_pixels(txt, path = 'arialbd.ttf', fontsize = size)
+        for y in range(len(array)):
+            for x in range(len(array[y])):
+                self.draw(x,y,array[y][x])
+
 def set_bit_on(value, bit_index):
     return value | (1 << bit_index)
 
 def set_bit_off(value, bit_index):
     return value & ~(1 << bit_index)
+
+

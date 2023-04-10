@@ -26,7 +26,7 @@ rs232 = serial_port.initiate_serial() #initiate serial com2
 
 def main():
     color=1
-    if color==0:
+    if 1==2:
         refresh()
         for y in range(28):
             for x in range(28):
@@ -36,12 +36,18 @@ def main():
             color = 0
         else:
             color = 1
-    while True:
+
+    if 1==2:
         for ct in range(500):
             x = random.randint(0,27)
             y = random.randint(0,27)
             color = random.randint(0,1)
             panels.draw(x,y,color)
+        refresh()
+    while True:
+        chat = input("Text")
+        panels.clear()
+        panels.drawTxt(chat , 14)
         refresh()
 
 def refresh(flaggs=True):
