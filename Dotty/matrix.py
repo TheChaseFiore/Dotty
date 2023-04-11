@@ -51,6 +51,13 @@ class matrix:
             for x in range(len(array[y])):
                 self.draw(x,y,array[y][x])
 
+    def frame(self, array):
+        for y in range(len(array)):
+            for x in range(len(array[y])):
+                self.draw(x,y,array[y][x])
+
+
+
 def set_bit_on(value, bit_index):
     return value | (1 << bit_index)
 

@@ -1,37 +1,48 @@
 # importing the necessary libraries
 import cv2
 import numpy as np
-
-# Creating a VideoCapture object to read the video
-cap = cv2.VideoCapture('sample.mp4')
+import serial_port
 
 
-# Loop until the end of the video
-while (cap.isOpened()):
 
-	# Capture frame-by-frame
-	ret, frame = cap.read()
-	frame = cv2.resize(frame, (28, 28), fx = 0, fy = 0,
-						interpolation = cv2.INTER_CUBIC)
 
-	# Display the resulting frame
-	cv2.imshow('Frame', frame)
+class imageSequece:
+	def __init__(self):
+		self.data=[]
+		self.updateFlag = True
 
-	# conversion of BGR to grayscale is necessary to apply this operation
-	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-	# adaptive thresholding to use different threshold
-	# values on different regions of the frame.
-	Thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-										cv2.THRESH_BINARY_INV, 11, 2)
-	print(Thresh)
+	# Loop until the end of the video
+	def run(self,panels,rs232):
+		cap = cv2.VideoCapture('sample.mp4')
+		while True:
+		#while (self.cap.isOpened()):
 
-	cv2.imshow('Thresh', Thresh)
-	# define q as the exit button
-	if cv2.waitKey(25) & 0xFF == ord('q'):
-		break
+			# Capture frame-by-frame
+			ret, frame = cap.read()
+			frame = cv2.resize(frame, (28, 28), fx =0, fy = 0,
+                         interpolation = cv2.INTER_CUBIC)
 
-# release the video capture object
-cap.release()
-# Closes all the windows currently opened.
-cv2.destroyAllWindows()
+			# Display the resulting frame
+			cv2.imshow('Frame', frame)
+
+			# conversion of BGR to grayscale is necessary to apply this operation
+			gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+			# adaptive thresholding to use different threshold
+			# values on different regions of the frame.
+			Thresh = cv2.adaptiveThreshold(gray, 1, cv2.ADAPTIVE_THRESH_MEAN_C,
+												cv2.THRESH_BINARY_INV, 11, 2)
+			panels.frame(Thresh)
+			self.updateFlag = True
+			serial_port.refresh(panels,rs232,False)
+
+			cv2.imshow('Thresh', Thresh)
+			# define q as the exit button
+			if cv2.waitKey(25) & 0xFF == ord('q'):
+				break
+
+		# release the video capture object
+		self.cap.release()
+		# Closes all the windows currently opened.
+		cv2.destroyAllWindows()
