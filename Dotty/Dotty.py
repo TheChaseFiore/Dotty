@@ -53,8 +53,11 @@ def main():
         panels.drawTxt(chat , 14)
         refresh()
 
+    panels.time(12,87)
+    refresh()
+
     #bitmap = video.imageSequece()
-    run()
+    #runVideo()
 
 def refresh(flaggs=True):
     serial_port.refresh(panels,rs232,flaggs)
@@ -69,7 +72,7 @@ def fps():
         refresh(True)
         time.sleep(1/60) #0.016 == 1/60
 
-def run():
+def runVideo():
 		cap = cv2.VideoCapture('sample.mp4')
 		while True:
 		#while (self.cap.isOpened()):
