@@ -51,11 +51,20 @@ class matrix:
             for x in range(len(array[y])):
                 self.draw(x,y,array[y][x])
 
-    def frame(self, array):
+    def frame(self, array,dx=0,dy=0):
         for y in range(len(array)):
             for x in range(len(array[y])):
-                self.draw(x,y,array[y][x])
-
+                self.draw(x+dx,y+dy,array[y][x])
+                
+    def time(self,h,m,s=0):
+        d1 = int(h/10)
+        d2 = h%10
+        d3 = int(m/10)
+        d4 = m%10
+        self.frame(returnDigit(d1),0,0)
+        self.frame(returnDigit(d2),14,0)
+        self.frame(returnDigit(d3),0,14)
+        self.frame(returnDigit(d4),14,14)
 
 
 def set_bit_on(value, bit_index):
@@ -64,4 +73,39 @@ def set_bit_on(value, bit_index):
 def set_bit_off(value, bit_index):
     return value & ~(1 << bit_index)
 
-
+def returnDigit(digit):
+    match digit:
+        case 0:
+            num = [[0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                    [0,0,1,1,1,1,1,1,1,1,1,0,0,0],
+                    [0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+                    [0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+                    [0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+                    [0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+                    [0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+                    [0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+                    [0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+                    [0,0,1,1,1,1,1,1,1,1,1,0,0,0],
+                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                    [0,0,0,0,0,0,0,0,0,0,0,0,0,0]]
+        case 1:
+            pass
+        case 2:
+            pass
+        case 3:
+            pass
+        case 4:
+            pass
+        case 5:
+            pass
+        case 6:
+            pass
+        case 7:
+            pass
+        case 8:
+            pass
+        case 9:
+            pass
+    return num
