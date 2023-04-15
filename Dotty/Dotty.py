@@ -12,18 +12,16 @@ __status__ = "Production"
 
 import serial_port, matrix
 #import video
-import time, os
-import random
+from datetime import datetime
+import time
 #import gui
 from multiprocessing import Process, Array
 import cv2
 import numpy as np
 
-global rs232, panels, clock
+
+global rs232, panels
 panels = matrix.matrix(4)#make matrix with X panels
-os.environ['TZ'] = 'America/New_York' # set new timezone
-#time.tzset()
-clock = time.localtime()
 rs232 = serial_port.initiate_serial() #initiate serial com2
 
 def main():
@@ -52,9 +50,11 @@ def main():
         panels.clear()
         panels.drawTxt(chat , 14)
         refresh()
-
-    panels.time(12,87)
-    refresh()
+    while True:
+        clock = getTime()
+        panels.time(clock[0],clock[1])
+        refresh()
+        time.sleep(0.1)
 
     #bitmap = video.imageSequece()
     #runVideo()
@@ -63,8 +63,10 @@ def refresh(flaggs=True):
     serial_port.refresh(panels,rs232,flaggs)
 
 def getTime():
-    clock = time.localtime()
-    #print(clock.tm_hour,":",clock.tm_min,":",clock.tm_sec," - ",clock.tm_zone)
+    clock = datetime.now()
+    clock = [int(clock.strftime('%H')),int(clock.strftime('%M')),int(clock.strftime('%S'))]
+    #print(clock[0],":",clock[1],":",clock[2])
+    return clock
 
 def fps():
     while True:
