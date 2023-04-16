@@ -50,10 +50,22 @@ def main():
         panels.clear()
         panels.drawTxt(chat , 14)
         refresh()
+    lm=0
     while True:
         clock = getTime()
-        panels.time(clock[0],clock[1])
-        refresh()
+        h=clock[0]
+        m=clock[1]
+        panels.time(h,m)
+        if lm != m: #only update once per min
+            if m == 0 : #top of the hour
+                for ct in range(h):
+                    panels.invert()
+                    refresh()
+                    time.sleep(.5)
+                if h%2 != 0:
+                    panels.invert()
+            refresh()
+            lm=m
         time.sleep(0.1)
 
     #bitmap = video.imageSequece()
