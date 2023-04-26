@@ -56,12 +56,16 @@ def main():
         h=clock[0]
         m=clock[1]
         panels.time(h,m)
+
+        if h >= 22 or h <=7:
+             panels.clear()
+        
         if lm != m: #only update once per min
             if m == 0 : #top of the hour
-                for ct in range(h):
+                for ct in range(3):
                     panels.invert()
                     refresh()
-                    time.sleep(.5)
+                    time.sleep(.2)
                 if h%2 != 0:
                     panels.invert()
             refresh()

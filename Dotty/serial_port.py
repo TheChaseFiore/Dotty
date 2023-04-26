@@ -34,7 +34,7 @@ def serial_ports():
     return result
 
 def initiate_serial():
-    rs232 = serial.Serial('COM2',57600)  # open serial port
+    rs232 = serial.Serial("/dev/ttyS0",57600)  # open serial port
     print(rs232.name)         # check which port was really used
     return rs232
 
