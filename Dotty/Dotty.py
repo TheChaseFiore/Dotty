@@ -57,8 +57,12 @@ def main():
         m=clock[1]
         panels.time(h,m)
 
-        if h >= 22 or h <=7:
-             panels.clear()
+        while h >= 22 or h <7: #night time hours
+            panels.clear()
+            refresh()
+            clock = getTime()
+            h=clock[0]
+            time.sleep(60)
         
         if lm != m: #only update once per min
             if m == 0 : #top of the hour
