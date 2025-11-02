@@ -165,13 +165,13 @@ def main():
 
             last_min = m
 
-     """   # SSH trigger: do the same sequence
+     '''# SSH trigger: do the same sequence
         if os.path.exists(TRIGGER_FILE):
             random_invert_animation(panels, refresh,
                                     delay=0.01,
                                     width=WIDTH, height=HEIGHT)
             DISPLAY_INVERTED = not DISPLAY_INVERTED
-            os.remove(TRIGGER_FILE)"""
+            os.remove(TRIGGER_FILE)'''
 
         if os.path.exists(TRIGGER_FILE):
             random_invert_animation(...)
