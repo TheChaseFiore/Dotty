@@ -16,7 +16,8 @@ SHOW_SECONDS_FILE = "/tmp/dotty_show_seconds"
 WIDTH = 28
 HEIGHT = 28
 DIGIT_SIZE = 14
-SNAKE_DELAY = 0.5  # 👈 change this to speed up/slow down
+SNAKE_DELAY = 0.01      # minute animation speed
+SEC_SNAKE_DELAY = 0.02  # seconds animation speed (must be faster)
 
 # hardware
 panels = matrix.matrix(4)
@@ -95,10 +96,8 @@ def make_digit_runs(mask):
     return runs
 
 
-def erase_digit_snake(dx, dy, old_mask, inverted, delay=SNAKE_DELAY):
-    # correct background
+def erase_digit_snake(dx, dy, old_mask, inverted, delay):
     bg = 0 if not inverted else 1
-
     runs = make_digit_runs(old_mask)
     for run in runs:
         for (lx, ly) in run:
@@ -108,10 +107,8 @@ def erase_digit_snake(dx, dy, old_mask, inverted, delay=SNAKE_DELAY):
                 time.sleep(delay)
 
 
-def draw_digit_snake(dx, dy, new_mask, inverted, delay=SNAKE_DELAY):
-    # correct foreground
+def draw_digit_snake(dx, dy, new_mask, inverted, delay):
     fg = 1 if not inverted else 0
-
     runs = make_digit_runs(new_mask)
     for run in runs:
         for (lx, ly) in run:
@@ -150,11 +147,6 @@ def draw_hours_only(h, inverted):
 
 
 def draw_hours_and_bottom(h, bottom_val, inverted):
-    """
-    Draw 4 digits on the 28x28:
-    top 2 = hours
-    bottom 2 = bottom_val (minutes or seconds)
-    """
     panels.clear()
 
     # hours
@@ -184,6 +176,7 @@ def main():
 
     last_min = -1
     last_hour = -1
+    last_sec = -1
     prev_show_seconds = False
 
     # initial paint (hours + minutes)
@@ -194,19 +187,53 @@ def main():
         h, m, s = get_time()
         show_seconds = os.path.exists(SHOW_SECONDS_FILE)
 
-        # 🧪 test mode: show SECONDS instead of MINUTES
+        # 🧪 SECONDS MODE: bottom shows seconds instead of minutes
         if show_seconds:
-            draw_hours_and_bottom(h, s, DISPLAY_INVERTED)
-            prev_show_seconds = True
-            time.sleep(0.1)
+            # first time we enter seconds mode, just paint it
+            if not prev_show_seconds:
+                draw_hours_and_bottom(h, s, DISPLAY_INVERTED)
+                last_sec = s
+                prev_show_seconds = True
+                time.sleep(0.05)
+                continue
+
+            # seconds ticked → animate ONLY the changed bottom digit(s)
+            if s != last_sec:
+                old_s = last_sec
+                old_tens = old_s // 10
+                old_ones = old_s % 10
+                new_tens = s // 10
+                new_ones = s % 10
+
+                # seconds tens (0,14)
+                if new_tens != old_tens:
+                    erase_digit_snake(0, 14, matrix.returnDigit(old_tens),
+                                      DISPLAY_INVERTED, delay=SEC_SNAKE_DELAY)
+                    draw_digit_snake(0, 14, matrix.returnDigit(new_tens),
+                                     DISPLAY_INVERTED, delay=SEC_SNAKE_DELAY)
+
+                # seconds ones (14,14)
+                if new_ones != old_ones:
+                    erase_digit_snake(14, 14, matrix.returnDigit(old_ones),
+                                      DISPLAY_INVERTED, delay=SEC_SNAKE_DELAY)
+                    draw_digit_snake(14, 14, matrix.returnDigit(new_ones),
+                                     DISPLAY_INVERTED, delay=SEC_SNAKE_DELAY)
+
+                last_sec = s
+
+            time.sleep(0.05)
             continue
+
         else:
-            # we were in seconds mode, now stop → restore minutes
+            # we were in seconds mode, now back to minutes
             if prev_show_seconds:
                 draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
                 prev_show_seconds = False
+                last_sec = -1  # reset
 
-        # normal minute-driven mode
+        # -----------------------------
+        # NORMAL MINUTE MODE
+        # -----------------------------
         if m != last_min:
             old_m = last_min if last_min >= 0 else m
             old_tens = old_m // 10
