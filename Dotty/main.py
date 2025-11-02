@@ -16,7 +16,7 @@ SHOW_SECONDS_FILE = "/tmp/dotty_show_seconds"
 WIDTH = 28
 HEIGHT = 28
 DIGIT_SIZE = 14
-SNAKE_DELAY = 0.09  # 👈 change this to speed up/slow down
+SNAKE_DELAY = 0.5  # 👈 change this to speed up/slow down
 
 # hardware
 panels = matrix.matrix(4)
