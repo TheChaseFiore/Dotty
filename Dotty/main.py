@@ -18,6 +18,7 @@ import time
 from multiprocessing import Process, Array
 #import cv2
 import numpy as np
+import random
 
 
 global rs232, panels
@@ -56,20 +57,22 @@ def main():
         h=clock[0]
         m=clock[1]
         panels.time(h,m)
-        if lm != m: #only update once per min
-            if m == 0 : #top of the hour
-                for ct in range(h):
-                    panels.invert()
-                    refresh()
-                    time.sleep(.5)
-                if h%2 != 0:
-                    panels.invert()
-            refresh()
-            lm=m
-        time.sleep(0.1)
-
-    #bitmap = video.imageSequece()
-    #runVideo()
+		if lm != m:  # only update once per min
+		    if m == 0:  # top of the hour
+		        # fancy random invert
+		        random_invert_animation(panels, refresh, delay=0.01, width=28, height=28)
+		
+		        # if you STILL want your old "chime" invert-by-hour effect,
+		        # you can run it AFTER the random wipe:
+		        # for ct in range(h):
+		        #     panels.invert()
+		        #     refresh()
+		        #     time.sleep(.5)
+		        # if h % 2 != 0:
+		        #     panels.invert()
+		
+		    refresh()
+		    lm = m
 
 def refresh(flaggs=True):
     serial_port.refresh(panels,rs232,flaggs)
@@ -118,6 +121,26 @@ def fps():
 		self.cap.release()
 		# Closes all the windows currently opened.
 		cv2.destroyAllWindows()"""
+
+def random_invert_animation(panels, refresh_fn, delay=0.01, width=28, height=28):
+    # 1. grab what’s currently on the display
+    current = np.zeros((height, width), dtype=int)
+    for y in range(height):
+        for x in range(width):
+            current[y, x] = panels.get(x, y)
+
+    # 2. compute the inverted target
+    target = 1 - current
+
+    # 3. make a shuffled list of all pixel coords
+    coords = [(x, y) for y in range(height) for x in range(width)]
+    random.shuffle(coords)
+
+    # 4. walk through them one by one
+    for (x, y) in coords:
+        panels.draw(x, y, int(target[y, x]))
+        refresh_fn()
+        time.sleep(delay)
 
 if __name__ == "__main__":
 
