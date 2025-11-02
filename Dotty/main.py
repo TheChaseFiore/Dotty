@@ -16,7 +16,7 @@ SHOW_SECONDS_FILE = "/tmp/dotty_show_seconds"
 WIDTH = 28
 HEIGHT = 28
 DIGIT_SIZE = 14
-SNAKE_DELAY = 0.01        # default minute speed
+SNAKE_DELAY = 0.06        # default minute speed
 SEC_SNAKE_DELAY = 0.02    # default second speed
 
 SNAKE_DELAY_FILE = "/tmp/dotty_snake_delay"
@@ -73,10 +73,16 @@ def read_delay(path, fallback):
 # digit helpers
 # ------------------------------------------------------------
 def make_digit_runs(mask):
+    """
+    Return runs in a deterministic, snakey order:
+      1. all horizontal strokes, top -> bottom, left -> right
+      2. then all vertical strokes, left -> right, top -> bottom
+    (no sorting by length, so parallel-looking strokes won’t happen)
+    """
     consumed = [[False] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
     runs = []
 
-    # horizontal first
+    # 1) horizontal first (top → bottom)
     for y in range(DIGIT_SIZE):
         x = 0
         while x < DIGIT_SIZE:
@@ -90,7 +96,7 @@ def make_digit_runs(mask):
             else:
                 x += 1
 
-    # vertical for leftovers
+    # 2) vertical for leftovers (left → right)
     for x in range(DIGIT_SIZE):
         y = 0
         while y < DIGIT_SIZE:
@@ -104,9 +110,7 @@ def make_digit_runs(mask):
             else:
                 y += 1
 
-    runs.sort(key=len, reverse=True)
     return runs
-
 
 def erase_digit_snake(dx, dy, old_mask, inverted, delay):
     bg = 0 if not inverted else 1
