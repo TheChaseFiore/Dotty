@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 """
-Dotty main loop
+Dotty main loop (advanced diff transitions)
 
-- 28x28 → 4 digits (top = hours, bottom = minutes/seconds)
-- /tmp/dotty_show_seconds → bottom shows seconds
-- /tmp/dotty_top_of_hour → force invert + redraw
-- /tmp/dotty_snake_delay → live minute speed
-- /tmp/dotty_sec_snake_delay → live seconds speed
-- /tmp/dotty_force_minute → test the minute animation right now
-- minute/second transitions are now DIFF-AWARE (minimum pixels flipped)
+- 28x28 → 4 digits:
+    (0, 0)  -> hour tens
+    (14, 0) -> hour ones
+    (0, 14) -> minute/second tens
+    (14,14) -> minute/second ones
+
+- Normal = bottom shows minutes
+- /tmp/dotty_show_seconds = bottom shows seconds
+- /tmp/dotty_top_of_hour = force invert + redraw
+- /tmp/dotty_snake_delay = live minute speed
+- /tmp/dotty_sec_snake_delay = live second speed
+- /tmp/dotty_force_minute = test minute animation now
+
+NEW:
+- digit transitions only touch pixels that actually change
+- erase phase and draw phase are separate
+- each phase walks *connected components* → “one motion per shape”
 """
 
 import os
@@ -96,146 +106,103 @@ def read_delay(path, fallback):
 
 
 # ---------------------------------------------------------------------
-# DIGIT → SNAKE RUNS (adjacency-driven)
+# CONNECTED COMPONENTS FOR 14x14 MASKS
 # ---------------------------------------------------------------------
-def make_digit_runs(mask):
+def mask_connected_components(mask):
     """
-    Build runs from a 14x14 mask, but order them so each new run tries to
-    start from something we already drew. Keeps 0/4 from drawing both rails
-    in parallel and makes 3 draw from the spine outward.
+    mask: 14x14 list-of-lists (0/1)
+    return: list of components, each component is list[(x,y)]
     """
-    DIG = DIGIT_SIZE
-    tmp_runs = []
-    consumed = [[False] * DIG for _ in range(DIG)]
+    visited = [[False] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
+    comps = []
 
-    # 1) horizontals first (top → bottom)
-    for y in range(DIG):
-        x = 0
-        while x < DIG:
-            if mask[y][x] == 1 and not consumed[y][x]:
-                run = []
-                while x < DIG and mask[y][x] == 1 and not consumed[y][x]:
-                    consumed[y][x] = True
-                    run.append((x, y))
-                    x += 1
-                tmp_runs.append(run)
-            else:
-                x += 1
+    for y in range(DIGIT_SIZE):
+        for x in range(DIGIT_SIZE):
+            if mask[y][x] == 1 and not visited[y][x]:
+                # BFS/DFS
+                stack = [(x, y)]
+                visited[y][x] = True
+                comp = [(x, y)]
+                while stack:
+                    cx, cy = stack.pop()
+                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        nx, ny = cx + dx, cy + dy
+                        if 0 <= nx < DIGIT_SIZE and 0 <= ny < DIGIT_SIZE:
+                            if mask[ny][nx] == 1 and not visited[ny][nx]:
+                                visited[ny][nx] = True
+                                stack.append((nx, ny))
+                                comp.append((nx, ny))
+                comps.append(comp)
 
-    # 2) verticals for leftovers (left → right)
-    for x in range(DIG):
-        y = 0
-        while y < DIG:
-            if mask[y][x] == 1 and not consumed[y][x]:
-                run = []
-                while y < DIG and mask[y][x] == 1 and not consumed[y][x]:
-                    consumed[y][x] = True
-                    run.append((x, y))
-                    y += 1
-                tmp_runs.append(run)
-            else:
-                y += 1
+    return comps
 
-    if not tmp_runs:
-        return []
 
-    # helper: does point touch anything we've already drawn?
-    def touches_drawn(pt, drawn):
-        x, y = pt
-        for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
-            if (x + dx, y + dy) in drawn:
-                return True
-        return False
-
-    # start with earliest run on screen
-    start_idx = min(
-        range(len(tmp_runs)),
-        key=lambda i: (tmp_runs[i][0][1], tmp_runs[i][0][0])
-    )
-    ordered = [tmp_runs.pop(start_idx)]
-    drawn = set(ordered[0])
-
-    # greedily add runs that touch what we've drawn
-    while tmp_runs:
-        picked_idx = None
-        picked_run = None
-
-        for i, run in enumerate(tmp_runs):
-            first = run[0]
-            last = run[-1]
-            first_touches = touches_drawn(first, drawn)
-            last_touches = touches_drawn(last, drawn)
-
-            if first_touches or last_touches:
-                picked_idx = i
-                picked_run = run
-                # if it connects at the end, reverse so we draw from the connection
-                if (not first_touches) and last_touches:
-                    picked_run = list(reversed(picked_run))
-                break
-
-        if picked_idx is None:
-            # nothing touched — just take the next one
-            picked_run = tmp_runs.pop(0)
-        else:
-            tmp_runs.pop(picked_idx)
-
-        ordered.append(picked_run)
-        drawn.update(picked_run)
-
-    return ordered
+def order_component_pixels(comp):
+    """
+    Make a reasonable, non-jumpy order for a single component.
+    Easiest: sort top-to-bottom, then left-to-right.
+    Since components are small, this looks like "one stroke".
+    """
+    return sorted(comp, key=lambda p: (p[1], p[0]))
 
 
 # ---------------------------------------------------------------------
-# DIFF-AWARE SNAKE TRANSITION  👈 NEW SMART VERSION
+# ADVANCED DIFF-AWARE TRANSITION
 # ---------------------------------------------------------------------
-def snake_digit_transition(dx, dy, old_mask, new_mask, inverted, delay):
+def advanced_digit_transition(dx, dy, old_mask, new_mask, inverted, delay):
     """
-    Smart, minimum-change snake:
-      - walk a connected path built from (old OR new)
-      - at each pixel:
-          old=1, new=0 → erase
-          old=0, new=1 → draw
-          else → skip
-    So we only flip the pixels that *actually* changed.
+    Do a minimum-change transition from old_mask → new_mask.
+
+    1. ERASE PHASE:
+        build erase_mask = old=1 and new=0
+        find connected components
+        for each component: walk it in order, erase
+
+    2. DRAW PHASE:
+        build draw_mask = old=0 and new=1
+        find connected components
+        for each component: walk it in order, draw
+
+    This gives the behavior you described:
+    - 9→0  →  1 erase blob (right column + middle bar), then 1–2 draw blobs
+    - 2→3  →  1 erase blob (left mid), 1 draw blob (right mid)
+    - 4→5  →  1 erase blob (right rail), 2 draw blobs (top bar, bottom bar)
     """
     bg = 0 if not inverted else 1
     fg = 1 if not inverted else 0
-    DIG = DIGIT_SIZE
 
-    # union: places we might need to touch
-    union_mask = [
-        [
-            1 if (old_mask[y][x] == 1 or new_mask[y][x] == 1) else 0
-            for x in range(DIG)
-        ]
-        for y in range(DIG)
-    ]
+    # 1) build erase_mask and draw_mask
+    erase_mask = [[0] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
+    draw_mask = [[0] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
 
-    runs = make_digit_runs(union_mask)
+    for y in range(DIGIT_SIZE):
+        for x in range(DIGIT_SIZE):
+            o = old_mask[y][x]
+            n = new_mask[y][x]
+            if o == 1 and n == 0:
+                erase_mask[y][x] = 1
+            elif o == 0 and n == 1:
+                draw_mask[y][x] = 1
 
-    for run in runs:
-        for (lx, ly) in run:
-            old_val = old_mask[ly][lx]
-            new_val = new_mask[ly][lx]
+    # 2) ERASE PHASE: one stroke per connected comp
+    erase_comps = mask_connected_components(erase_mask)
+    for comp in erase_comps:
+        for (lx, ly) in order_component_pixels(comp):
+            panels.draw(dx + lx, dy + ly, bg)
+            refresh()
+            time.sleep(delay)
 
-            # no change needed
-            if old_val == new_val:
-                continue
-
-            # change needed
-            if new_val == 1:
-                color = fg
-            else:
-                color = bg
-
-            panels.draw(dx + lx, dy + ly, color)
+    # 3) DRAW PHASE: one stroke per connected comp
+    draw_comps = mask_connected_components(draw_mask)
+    for comp in draw_comps:
+        for (lx, ly) in order_component_pixels(comp):
+            panels.draw(dx + lx, dy + ly, fg)
             refresh()
             time.sleep(delay)
 
 
 # ---------------------------------------------------------------------
-# ANIMATIONS
+# OTHER ANIMATIONS
 # ---------------------------------------------------------------------
 def random_invert_animation(panels_obj, refresh_fn,
                             delay=0.01, width=WIDTH, height=HEIGHT):
@@ -250,7 +217,7 @@ def random_invert_animation(panels_obj, refresh_fn,
 
 
 # ---------------------------------------------------------------------
-# DRAWING CONVENIENCE
+# DRAWING
 # ---------------------------------------------------------------------
 def draw_hours_only(h, inverted):
     d1 = h // 10
@@ -268,13 +235,13 @@ def draw_hours_only(h, inverted):
 def draw_hours_and_bottom(h, bottom_val, inverted):
     panels.clear()
 
-    # top
+    # hours (top)
     d1 = h // 10
     d2 = h % 10
     panels.frame(matrix.returnDigit(d1), 0, 0)
     panels.frame(matrix.returnDigit(d2), 14, 0)
 
-    # bottom
+    # bottom (minutes or seconds)
     b1 = bottom_val // 10
     b2 = bottom_val % 10
     panels.frame(matrix.returnDigit(b1), 0, 14)
@@ -306,16 +273,15 @@ def main():
         h, m, s = get_time()
         show_seconds = os.path.exists(SHOW_SECONDS_FILE)
 
-        # live tuning
+        # live SSH tuning
         minute_delay = read_delay(SNAKE_DELAY_FILE, SNAKE_DELAY_DEFAULT)
         second_delay = read_delay(SEC_SNAKE_DELAY_FILE, SEC_SNAKE_DELAY_DEFAULT)
 
         # =========================================================
-        # SECONDS MODE
+        # SECONDS MODE (bottom shows seconds)
         # =========================================================
         if show_seconds:
             if not prev_show_seconds:
-                # first frame entering seconds mode
                 draw_hours_and_bottom(h, s, DISPLAY_INVERTED)
                 last_sec = s
                 prev_show_seconds = True
@@ -331,7 +297,7 @@ def main():
 
                 # seconds tens
                 if new_tens != old_tens:
-                    snake_digit_transition(
+                    advanced_digit_transition(
                         0, 14,
                         matrix.returnDigit(old_tens),
                         matrix.returnDigit(new_tens),
@@ -341,7 +307,7 @@ def main():
 
                 # seconds ones
                 if new_ones != old_ones:
-                    snake_digit_transition(
+                    advanced_digit_transition(
                         14, 14,
                         matrix.returnDigit(old_ones),
                         matrix.returnDigit(new_ones),
@@ -351,7 +317,7 @@ def main():
 
                 last_sec = s
 
-            # allow invert even in seconds mode
+            # allow invert in seconds mode
             if os.path.exists(TRIGGER_INVERT_FILE):
                 random_invert_animation(panels, refresh,
                                         delay=0.01,
@@ -363,7 +329,7 @@ def main():
             time.sleep(0.05)
             continue
 
-        # leaving seconds mode → restore minutes
+        # leaving seconds mode → back to minutes
         if prev_show_seconds:
             draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
             prev_show_seconds = False
@@ -375,14 +341,14 @@ def main():
         if os.path.exists(FORCE_MINUTE_FILE):
             tens = m // 10
             ones = m % 10
-            snake_digit_transition(
+            advanced_digit_transition(
                 0, 14,
                 matrix.returnDigit(tens),
                 matrix.returnDigit(tens),
                 DISPLAY_INVERTED,
                 delay=minute_delay,
             )
-            snake_digit_transition(
+            advanced_digit_transition(
                 14, 14,
                 matrix.returnDigit(ones),
                 matrix.returnDigit(ones),
@@ -410,7 +376,7 @@ def main():
 
             # minute tens
             if new_tens != old_tens:
-                snake_digit_transition(
+                advanced_digit_transition(
                     0, 14,
                     matrix.returnDigit(old_tens),
                     matrix.returnDigit(new_tens),
@@ -420,7 +386,7 @@ def main():
 
             # minute ones
             if new_ones != old_ones:
-                snake_digit_transition(
+                advanced_digit_transition(
                     14, 14,
                     matrix.returnDigit(old_ones),
                     matrix.returnDigit(new_ones),
@@ -430,13 +396,13 @@ def main():
 
             last_min = m
 
-            # hour might have changed too
+            # hour may have changed too
             if h != last_hour:
                 draw_hours_only(h, DISPLAY_INVERTED)
                 last_hour = h
 
         # =========================================================
-        # SSH INVERT TRIGGER
+        # SSH INVERT TRIGGER (normal mode)
         # =========================================================
         if os.path.exists(TRIGGER_INVERT_FILE):
             random_invert_animation(panels, refresh,
