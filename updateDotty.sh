@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # --- Configuration ---
-REPO_URL="https://github.com/USERNAME/REPO_NAME.git"
-REPO_DIR="/opt/REPO_NAME"
-PYTHON_SCRIPT="main.py"   # Change to your script name
+REPO_URL="https://github.com/TheChaseFiore/Dotty"
+REPO_DIR="/opt/Dotty"
+PYTHON_SCRIPT="Dotty/main.py"   # Change to your script name
 PYTHON_BIN="/usr/bin/python3"  # Adjust if needed
 
 # --- Script Start ---
