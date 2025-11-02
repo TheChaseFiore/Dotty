@@ -16,7 +16,7 @@ from datetime import datetime
 import time
 #import gui
 from multiprocessing import Process, Array
-import cv2
+#import cv2
 import numpy as np
 
 
@@ -86,7 +86,7 @@ def fps():
         refresh(True)
         time.sleep(1/60) #0.016 == 1/60
 
-def runVideo():
+"""def runVideo():
 		cap = cv2.VideoCapture('sample.mp4')
 		while True:
 		#while (self.cap.isOpened()):
@@ -117,7 +117,7 @@ def runVideo():
 		# release the video capture object
 		self.cap.release()
 		# Closes all the windows currently opened.
-		cv2.destroyAllWindows()
+		cv2.destroyAllWindows()"""
 
 if __name__ == "__main__":
 
