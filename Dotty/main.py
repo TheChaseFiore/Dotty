@@ -13,12 +13,14 @@ import matrix
 TRIGGER_FILE = "/tmp/dotty_top_of_hour"
 WIDTH = 28
 HEIGHT = 28
+DIGIT_SIZE = 14
+SNAKE_DELAY = 0.01   # 👈 speed knob for erase/draw
 
 # hardware
 panels = matrix.matrix(4)
 rs232 = serial_port.initiate_serial()
 
-# toggle every hour
+# toggled at top of hour
 DISPLAY_INVERTED = False
 
 
@@ -52,39 +54,88 @@ def draw_buffer(panels_obj, buf, refresh_fn=None):
         refresh_fn()
 
 
-def build_time_frame(panels_obj, h, m, inverted, width=WIDTH, height=HEIGHT):
-    """Return a 28x28 numpy array of what the time SHOULD look like."""
-    panels_obj.clear()
-    panels_obj.time(h, m)
-    refresh(False)
-    tgt = capture_screen(panels_obj, width, height)
-    if inverted:
-        tgt = 1 - tgt
-    return tgt
+# ------------------------------------------------------------
+# digit helpers
+# ------------------------------------------------------------
+def make_digit_runs(mask):
+    """
+    mask: 14x14 list-of-lists (0/1)
+    return: list of runs, each run is a list of (x,y), longest first
+    strategy:
+      1. take horizontal lines first, marking pixels as consumed
+      2. then vertical lines for any leftovers
+      3. sort by length desc
+    """
+    consumed = [[False] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
+    runs = []
+
+    # 1) horizontal runs
+    for y in range(DIGIT_SIZE):
+        x = 0
+        while x < DIGIT_SIZE:
+            if mask[y][x] == 1 and not consumed[y][x]:
+                start = x
+                pixels = []
+                while x < DIGIT_SIZE and mask[y][x] == 1 and not consumed[y][x]:
+                    consumed[y][x] = True
+                    pixels.append((x, y))
+                    x += 1
+                runs.append(pixels)
+            else:
+                x += 1
+
+    # 2) vertical runs for leftovers
+    for x in range(DIGIT_SIZE):
+        y = 0
+        while y < DIGIT_SIZE:
+            if mask[y][x] == 1 and not consumed[y][x]:
+                start = y
+                pixels = []
+                while y < DIGIT_SIZE and mask[y][x] == 1 and not consumed[y][x]:
+                    consumed[y][x] = True
+                    pixels.append((x, y))
+                    y += 1
+                runs.append(pixels)
+            else:
+                y += 1
+
+    # 3) longest first
+    runs.sort(key=len, reverse=True)
+    return runs
 
 
-def transition_frame_pixelwise(panels_obj, refresh_fn,
-                               current_frame, target_frame,
-                               per_pixel_delay=0.005,
-                               shuffle=True):
-    """ONLY change the pixels that are different."""
-    height, width = current_frame.shape
-    diffs = []
-    for y in range(height):
-        for x in range(width):
-            if current_frame[y, x] != target_frame[y, x]:
-                diffs.append((x, y))
-
-    if shuffle:
-        random.shuffle(diffs)
-
-    for (x, y) in diffs:
-        panels_obj.draw(x, y, int(target_frame[y, x]))
-        refresh_fn()
-        if per_pixel_delay > 0:
-            time.sleep(per_pixel_delay)
+def erase_digit_snake(dx, dy, old_mask, inverted, delay=SNAKE_DELAY):
+    """
+    dx,dy: top-left of the digit on the 28x28
+    old_mask: 14x14 0/1 (digit we want to ERASE)
+    inverted: if True, background is 0 and digit is 1->0 reversed
+    """
+    bg = 1 if not inverted else 0
+    runs = make_digit_runs(old_mask)
+    for run in runs:
+        for (lx, ly) in run:
+            panels.draw(dx + lx, dy + ly, bg)
+            refresh()
+            time.sleep(delay)
 
 
+def draw_digit_snake(dx, dy, new_mask, inverted, delay=SNAKE_DELAY):
+    """
+    Draw digit one stroke at a time
+    """
+    fg = 0 if inverted else 1
+    runs = make_digit_runs(new_mask)
+    for run in runs:
+        for (lx, ly) in run:
+            if new_mask[ly][lx] == 1:
+                panels.draw(dx + lx, dy + ly, fg)
+                refresh()
+                time.sleep(delay)
+
+
+# ------------------------------------------------------------
+# animations
+# ------------------------------------------------------------
 def random_invert_animation(panels_obj, refresh_fn,
                             delay=0.01, width=WIDTH, height=HEIGHT):
     current = capture_screen(panels_obj, width, height)
@@ -97,75 +148,92 @@ def random_invert_animation(panels_obj, refresh_fn,
         time.sleep(delay)
 
 
+# ------------------------------------------------------------
+# main loop
+# ------------------------------------------------------------
 def main():
     global DISPLAY_INVERTED
 
     last_min = -1
-    # draw the very first time screen
+    last_hour = -1
+
+    # draw initial time
     h, m, s = get_time()
     panels.clear()
     panels.time(h, m)
+    if DISPLAY_INVERTED:
+        buf = capture_screen(panels)
+        draw_buffer(panels, 1 - buf)
     refresh()
-    # capture that as our starting frame
-    prev_frame = capture_screen(panels)
 
     while True:
         h, m, s = get_time()
 
-        # minute just changed
         if m != last_min:
-            # top of hour: do the sparkle + flip polarity
+            # detect which minute digits changed
+            old_m = last_min if last_min >= 0 else m
+            old_tens = old_m // 10
+            old_ones = old_m % 10
+
+            new_tens = m // 10
+            new_ones = m % 10
+
+            # top of hour: do the invert and flip mode FIRST
             if m == 0:
                 random_invert_animation(panels, refresh,
                                         delay=0.01,
                                         width=WIDTH, height=HEIGHT)
                 DISPLAY_INVERTED = not DISPLAY_INVERTED
-                # very important: after invert, THIS is our prev frame
-                prev_frame = capture_screen(panels)
 
-            # 1) build what the NEW time should look like (in correct polarity)
-            target_frame = build_time_frame(panels, h, m, DISPLAY_INVERTED,
-                                            width=WIDTH, height=HEIGHT)
+            # now animate minute digits that changed
+            # bottom-left digit (minute tens) at (0,14)
+            if new_tens != old_tens:
+                old_mask = matrix.returnDigit(old_tens)
+                new_mask = matrix.returnDigit(new_tens)
+                # erase old
+                erase_digit_snake(0, 14, old_mask, DISPLAY_INVERTED, delay=SNAKE_DELAY)
+                # draw new
+                draw_digit_snake(0, 14, new_mask, DISPLAY_INVERTED, delay=SNAKE_DELAY)
 
-            # 2) put the OLD frame back on screen, so we can animate from it
-            draw_buffer(panels, prev_frame, refresh)
+            # bottom-right digit (minute ones) at (14,14)
+            if new_ones != old_ones:
+                old_mask = matrix.returnDigit(old_ones)
+                new_mask = matrix.returnDigit(new_ones)
+                erase_digit_snake(14, 14, old_mask, DISPLAY_INVERTED, delay=SNAKE_DELAY)
+                draw_digit_snake(14, 14, new_mask, DISPLAY_INVERTED, delay=SNAKE_DELAY)
 
-            # 3) animate ONLY the changed pixels
-            transition_frame_pixelwise(
-                panels,
-                refresh,
-                prev_frame,
-                target_frame,
-                per_pixel_delay=0.002,
-                shuffle=True,
-            )
-
-            # 4) remember the new frame for next minute
-            prev_frame = target_frame
+            # update minute marker
             last_min = m
 
-        # SSH trigger: do the hour thing right now
+            # after animating, make sure the hours are right too
+            # (hour might have changed at 59->00)
+            if h != last_hour:
+                # redraw hours in current polarity, but INSTANT (not animated)
+                panels.clear()
+                panels.time(h, m)
+                if DISPLAY_INVERTED:
+                    buf = capture_screen(panels)
+                    draw_buffer(panels, 1 - buf)
+                else:
+                    refresh()
+                last_hour = h
+
+        # SSH trigger: flip polarity now
         if os.path.exists(TRIGGER_FILE):
             random_invert_animation(panels, refresh,
                                     delay=0.01,
                                     width=WIDTH, height=HEIGHT)
             DISPLAY_INVERTED = not DISPLAY_INVERTED
-            # after a manual invert, we want time in the new polarity too
-            target_frame = build_time_frame(panels, h, m, DISPLAY_INVERTED,
-                                            width=WIDTH, height=HEIGHT)
-            draw_buffer(panels, prev_frame, refresh)
-            transition_frame_pixelwise(
-                panels,
-                refresh,
-                prev_frame,
-                target_frame,
-                per_pixel_delay=0.002,
-                shuffle=True,
-            )
-            prev_frame = target_frame
+            # redraw current time in new polarity
+            panels.clear()
+            panels.time(h, m)
+            if DISPLAY_INVERTED:
+                buf = capture_screen(panels)
+                draw_buffer(panels, 1 - buf)
+            else:
+                refresh()
             os.remove(TRIGGER_FILE)
 
-        # small sleep, we don’t need sub-ms loop
         time.sleep(0.1)
 
 
