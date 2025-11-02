@@ -12,3 +12,9 @@ touch /tmp/dotty_top_of_hour
 
 # slow down minute animation
 echo 0.25 | sudo tee /tmp/dotty_snake_delay
+
+#reboot
+sudo systemctl restart dotty.service
+
+#debug
+sudo journalctl -u dotty.service -f
