@@ -3,7 +3,7 @@ set -e
 
 REPO_URL="https://github.com/TheChaseFiore/Dotty"
 REPO_DIR="/home/chase/Dotty"   # use your real path
-PYTHON_SCRIPT="/Dotty/main.py"
+PYTHON_SCRIPT="/home/chase/Dotty/Dotty/main.py"
 PYTHON_BIN="/usr/bin/python3"
 
 if [ -d "$REPO_DIR/.git" ]; then
