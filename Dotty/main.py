@@ -25,6 +25,7 @@ HEIGHT = 28
 global rs232, panels
 panels = matrix.matrix(4)#make matrix with X panels
 rs232 = serial_port.initiate_serial() #initiate serial com2
+
 def getTime():
     now = datetime.now()
     return [int(now.strftime('%H')), int(now.strftime('%M')), int(now.strftime('%S'))]
@@ -34,56 +35,50 @@ def refresh(flaggs=True):
 
 def main():
     lm = 0
-
     while True:
         clock = getTime()
-        h = clock[0]
-        m = clock[1]
+        h, m, s = clock
 
-        # always show current time (steady state)
+        # show time in normal running mode
         panels.time(h, m)
 
-        # once per minute logic
         if lm != m:
             if m == 0:
-                # 1) random invert
-                random_invert_animation(
-                    panels,
-                    refresh,
-                    delay=0.01,
-                    width=WIDTH,
-                    height=HEIGHT,
-                )
-                # 2) matrix waterfall / rain
-                matrix_rain_animation(
-                    panels,
-                    refresh,
-                    width=WIDTH,
-                    height=HEIGHT,
-                    frames=70,
-                    spawn_chance=0.28,
-                    trail=4,
-                    frame_delay=0.04,
-                )
-                # 3) go back to time
-                show_time(panels, refresh, h, m)
+                # 1) do your random invert first (the "starting chaos")
+                random_invert_animation(panels, refresh,
+                                        delay=0.01,
+                                        width=WIDTH, height=HEIGHT)
+
+                # 2) build what the time SHOULD look like
+                target = build_time_frame(panels, refresh, h, m,
+                                          width=WIDTH, height=HEIGHT)
+
+                # 3) matrix-style reveal FROM the current noisy screen TO the time
+                matrix_rain_reveal(panels, refresh, target,
+                                   width=WIDTH, height=HEIGHT,
+                                   frames=140,
+                                   spawn_chance=0.25,
+                                   frame_delay=0.04)
 
             refresh()
             lm = m
 
-        # 🔔 SSH test trigger
+        # SSH trigger: same sequence
         if os.path.exists(TRIGGER_FILE):
-            # same sequence, but manual
-            random_invert_animation(panels, refresh, delay=0.01,
+            random_invert_animation(panels, refresh,
+                                    delay=0.01,
                                     width=WIDTH, height=HEIGHT)
-            matrix_rain_animation(panels, refresh,
-                                  width=WIDTH, height=HEIGHT,
-                                  frames=70, spawn_chance=0.28,
-                                  trail=4, frame_delay=0.04)
-            show_time(panels, refresh, h, m)
+            target = build_time_frame(panels, refresh, h, m,
+                                      width=WIDTH, height=HEIGHT)
+            matrix_rain_reveal(panels, refresh, target,
+                               width=WIDTH, height=HEIGHT,
+                               frames=140,
+                               spawn_chance=0.25,
+                               frame_delay=0.04)
             os.remove(TRIGGER_FILE)
 
         time.sleep(0.1)
+
 
 
 def refresh(flaggs=True):
@@ -121,57 +116,98 @@ def random_invert_animation(panels, refresh_fn, delay=0.01, width=28, height=28)
         refresh_fn()
         time.sleep(delay)
 
-def matrix_rain_animation(panels, refresh_fn, width=28, height=28, frames=60,
-                          spawn_chance=0.25, trail=4, frame_delay=0.05):
+def matrix_rain_reveal(panels, refresh_fn, target_frame,
+                       width=WIDTH, height=HEIGHT,
+                       frames=120, spawn_chance=0.25,
+                       frame_delay=0.04):
     """
-    Simple matrix-style rain:
-    - some columns spawn a drop at the top
-    - every frame, drops move down
-    - trail makes a fading tail
+    Matrix/rain style animation that gradually turns the current screen
+    into target_frame.
     """
-    # each drop: {"x": int, "y": int}
+    # start from whatever is on screen right now
+    current_frame = capture_screen(panels, width, height)
+
+    # falling drops: list of {"x": int, "y": int}
     drops = []
 
     for _ in range(frames):
-        # maybe spawn new drops
+        # if we already match the target, we can stop early
+        if np.array_equal(current_frame, target_frame):
+            break
+
+        # maybe spawn new drops at top
         for col in range(width):
             if random.random() < spawn_chance:
                 drops.append({"x": col, "y": 0})
 
-        # clear screen for this frame
-        panels.clear()
+        # we'll rebuild current_frame this step
+        # start by copying current_frame so we can modify it
+        new_frame = np.array(current_frame, copy=True)
 
-        # update & draw drops
         new_drops = []
         for d in drops:
             x = d["x"]
             y = d["y"]
 
-            # head of the drop
-            panels.draw(x, y, 1)
+            # when the drop passes over (x,y), "reveal" target there
+            new_frame[y, x] = target_frame[y, x]
 
-            # draw trailing bits behind it
-            for t in range(1, trail + 1):
-                ty = y - t
-                if 0 <= ty < height:
-                    panels.draw(x, ty, 1)
-
-            # move it down
+            # move drop down
             y += 1
             if y < height:
                 d["y"] = y
                 new_drops.append(d)
-            # else: drop is off-screen, don't keep
+            # else: drop is off-screen → drop it
 
         drops = new_drops
+        current_frame = new_frame
 
-        refresh_fn()
+        # draw current_frame to the hardware
+        draw_buffer(panels, current_frame, refresh_fn)
+
         time.sleep(frame_delay)
+
+    # make sure we end exactly on target
+    draw_buffer(panels, target_frame, refresh_fn)
+
         
 def show_time(panels, refresh_fn, h, m):
     panels.clear()
     panels.time(h, m)
     refresh_fn()
+
+def capture_screen(panels, width=WIDTH, height=HEIGHT):
+    buf = np.zeros((height, width), dtype=int)
+    for y in range(height):
+        for x in range(width):
+            buf[y, x] = panels.get(x, y)
+    return buf
+    
+def draw_buffer(panels, buf, refresh_fn=None):
+    h, w = buf.shape
+    for y in range(h):
+        for x in range(w):
+            panels.draw(x, y, int(buf[y, x]))
+    if refresh_fn:
+        refresh_fn()
+        
+def build_time_frame(panels, refresh_fn, h, m, width=WIDTH, height=HEIGHT):
+    # 1. save current screen
+    current = capture_screen(panels, width, height)
+
+    # 2. draw time
+    panels.clear()
+    panels.time(h, m)
+    refresh_fn()
+
+    # 3. capture time frame
+    target = capture_screen(panels, width, height)
+
+    # 4. restore what was on screen
+    draw_buffer(panels, current, refresh_fn)
+
+    return target
+
 
 
 if __name__ == "__main__":
