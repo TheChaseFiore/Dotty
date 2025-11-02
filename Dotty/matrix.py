@@ -2,72 +2,90 @@
 
 import txt_to_px
 
-global blp #byte look up
-blu = [6,5,4,3,2,1,0]
-alu = [0,2,3,5]
+global blp  # byte look up
+blu = [6, 5, 4, 3, 2, 1, 0]
+alu = [0, 2, 3, 5]
+
 
 class panel:
-    def __init__(self,in_address):
+    def __init__(self, in_address):
         self.updateFlag = True
         address = alu[in_address]
-        self.address = address.to_bytes(1,byteorder='big',signed=False)
+        self.address = address.to_bytes(1, byteorder='big', signed=False)
         self.rows = bytearray(28)
+
     def len(self):
         return len(self.rows)
 
+
 class matrix:
-    def __init__(self,panelCt=4):
+    def __init__(self, panelCt=4):
         self.panel = []
         for makePanel in range(panelCt):
-            self.panel.append(panel(makePanel)) #create matrix of panels with assigned addresses
-        return None
+            self.panel.append(panel(makePanel))  # create matrix of panels with assigned addresses
+
     def len(self):
         return len(self.panel)
 
+    # ✅ FIXED VERSION
     def get(self, x, y):
-        return self.panel[y][x]
+        """
+        Return 1/0 for pixel at (x, y).
+        We store 4 panels, each 7 pixels wide -> 28 px total.
+        Each panel has 28 rows, 1 byte per row.
+        """
+        panelNum = x // 7
+        if panelNum >= len(self.panel):
+            return 0  # out of range, be safe
+
+        byteNum = blu[x % 7]           # which bit in that byte
+        row_byte = self.panel[panelNum].rows[y]
+
+        # extract bit
+        return 1 if (row_byte >> byteNum) & 1 else 0
 
     def invert(self):
         for panel in self.panel:
             for ct in range(28):
-                panel.rows[ct] = ~panel.rows[ct] & 255 #invert all bits
-                panel.rows[ct] = set_bit_off(panel.rows[ct],7)
+                panel.rows[ct] = ~panel.rows[ct] & 255  # invert all bits
+                panel.rows[ct] = set_bit_off(panel.rows[ct], 7)
                 panel.updateFlag = True
 
-    def clear(self,color=1):
+    def clear(self, color=1):
         for panel in self.panel:
             panel.rows = bytearray(28)
             panel.updateFlag = True
 
-    def draw(self,x,y,color=1):
-        panelNum = x//7
-        byteNum = blu[x % 7] #byte look up
+    def draw(self, x, y, color=1):
+        panelNum = x // 7
+        byteNum = blu[x % 7]  # byte look up
         if color == 1:
-            self.panel[panelNum].rows[y] = set_bit_on(self.panel[panelNum].rows[y],byteNum)
+            self.panel[panelNum].rows[y] = set_bit_on(self.panel[panelNum].rows[y], byteNum)
         else:
-            self.panel[panelNum].rows[y] = set_bit_off(self.panel[panelNum].rows[y],byteNum)
+            self.panel[panelNum].rows[y] = set_bit_off(self.panel[panelNum].rows[y], byteNum)
         self.panel[panelNum].updateFlag = True
 
-    def drawTxt(self,txt,size=14):
-        array = txt_to_px.char_to_pixels(txt, path = 'arialbd.ttf', fontsize = size)
+    def drawTxt(self, txt, size=14):
+        array = txt_to_px.char_to_pixels(txt, path='arialbd.ttf', fontsize=size)
         for y in range(len(array)):
             for x in range(len(array[y])):
-                self.draw(x,y,array[y][x])
+                self.draw(x, y, array[y][x])
 
-    def frame(self, array,dx=0,dy=0):
+    def frame(self, array, dx=0, dy=0):
         for y in range(len(array)):
             for x in range(len(array[y])):
-                self.draw(x+dx,y+dy,array[y][x])
-                
-    def time(self,h,m,s=0):
-        d1 = int(h/10)
-        d2 = h%10
-        d3 = int(m/10)
-        d4 = m%10
-        self.frame(returnDigit(d1),0,0)
-        self.frame(returnDigit(d2),14,0)
-        self.frame(returnDigit(d3),0,14)
-        self.frame(returnDigit(d4),14,14)
+                self.draw(x + dx, y + dy, array[y][x])
+
+    def time(self, h, m, s=0):
+        d1 = int(h / 10)
+        d2 = h % 10
+        d3 = int(m / 10)
+        d4 = m % 10
+        self.frame(returnDigit(d1), 0, 0)
+        self.frame(returnDigit(d2), 14, 0)
+        self.frame(returnDigit(d3), 0, 14)
+        self.frame(returnDigit(d4), 14, 14)
+
 
 
 def set_bit_on(value, bit_index):
