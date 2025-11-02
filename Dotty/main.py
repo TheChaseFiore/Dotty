@@ -14,7 +14,8 @@ TRIGGER_FILE = "/tmp/dotty_top_of_hour"
 WIDTH = 28
 HEIGHT = 28
 DIGIT_SIZE = 14
-SNAKE_DELAY = 0.01   # 👈 speed knob for erase/draw
+SNAKE_DELAY = 0.01  # 👈 change this to speed up/slow down
+SHOW_SECONDS_FILE = "/tmp/dotty_show_seconds"
 
 # hardware
 panels = matrix.matrix(4)
@@ -58,23 +59,14 @@ def draw_buffer(panels_obj, buf, refresh_fn=None):
 # digit helpers
 # ------------------------------------------------------------
 def make_digit_runs(mask):
-    """
-    mask: 14x14 list-of-lists (0/1)
-    return: list of runs, each run is a list of (x,y), longest first
-    strategy:
-      1. take horizontal lines first, marking pixels as consumed
-      2. then vertical lines for any leftovers
-      3. sort by length desc
-    """
     consumed = [[False] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
     runs = []
 
-    # 1) horizontal runs
+    # horizontal first
     for y in range(DIGIT_SIZE):
         x = 0
         while x < DIGIT_SIZE:
             if mask[y][x] == 1 and not consumed[y][x]:
-                start = x
                 pixels = []
                 while x < DIGIT_SIZE and mask[y][x] == 1 and not consumed[y][x]:
                     consumed[y][x] = True
@@ -84,12 +76,11 @@ def make_digit_runs(mask):
             else:
                 x += 1
 
-    # 2) vertical runs for leftovers
+    # vertical for leftovers
     for x in range(DIGIT_SIZE):
         y = 0
         while y < DIGIT_SIZE:
             if mask[y][x] == 1 and not consumed[y][x]:
-                start = y
                 pixels = []
                 while y < DIGIT_SIZE and mask[y][x] == 1 and not consumed[y][x]:
                     consumed[y][x] = True
@@ -99,31 +90,28 @@ def make_digit_runs(mask):
             else:
                 y += 1
 
-    # 3) longest first
     runs.sort(key=len, reverse=True)
     return runs
 
 
 def erase_digit_snake(dx, dy, old_mask, inverted, delay=SNAKE_DELAY):
-    """
-    dx,dy: top-left of the digit on the 28x28
-    old_mask: 14x14 0/1 (digit we want to ERASE)
-    inverted: if True, background is 0 and digit is 1->0 reversed
-    """
-    bg = 1 if not inverted else 0
+    # ✅ FIX: correct background
+    bg = 0 if not inverted else 1
+
     runs = make_digit_runs(old_mask)
     for run in runs:
         for (lx, ly) in run:
-            panels.draw(dx + lx, dy + ly, bg)
-            refresh()
-            time.sleep(delay)
+            # only erase pixels that were ON in the old digit
+            if old_mask[ly][lx] == 1:
+                panels.draw(dx + lx, dy + ly, bg)
+                refresh()
+                time.sleep(delay)
 
 
 def draw_digit_snake(dx, dy, new_mask, inverted, delay=SNAKE_DELAY):
-    """
-    Draw digit one stroke at a time
-    """
-    fg = 0 if inverted else 1
+    # ✅ FIX: correct foreground
+    fg = 1 if not inverted else 0
+
     runs = make_digit_runs(new_mask)
     for run in runs:
         for (lx, ly) in run:
@@ -157,17 +145,26 @@ def main():
     last_min = -1
     last_hour = -1
 
-    # draw initial time
+    # initial paint
     h, m, s = get_time()
     panels.clear()
     panels.time(h, m)
-    if DISPLAY_INVERTED:
-        buf = capture_screen(panels)
-        draw_buffer(panels, 1 - buf)
     refresh()
 
     while True:
         h, m, s = get_time()
+
+        # 🧪 test mode: show seconds if file exists
+        if os.path.exists(SHOW_SECONDS_FILE):
+            panels.clear()
+            panels.time(h, m, s)   # you already have time(h,m,s=0) in matrix
+            if DISPLAY_INVERTED:
+                buf = capture_screen(panels)
+                draw_buffer(panels, 1 - buf)
+            else:
+                refresh()
+            time.sleep(0.1)
+            continue
 
         if m != last_min:
             # detect which minute digits changed
