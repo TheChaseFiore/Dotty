@@ -16,8 +16,11 @@ SHOW_SECONDS_FILE = "/tmp/dotty_show_seconds"
 WIDTH = 28
 HEIGHT = 28
 DIGIT_SIZE = 14
-SNAKE_DELAY = 0.01      # minute animation speed
-SEC_SNAKE_DELAY = 0.02  # seconds animation speed (must be faster)
+SNAKE_DELAY = 0.01        # default minute speed
+SEC_SNAKE_DELAY = 0.02    # default second speed
+
+SNAKE_DELAY_FILE = "/tmp/dotty_snake_delay"
+SEC_SNAKE_DELAY_FILE = "/tmp/dotty_sec_snake_delay"
 
 # hardware
 panels = matrix.matrix(4)
@@ -55,7 +58,16 @@ def draw_buffer(panels_obj, buf, refresh_fn=None):
             panels_obj.draw(x, y, int(buf[y, x]))
     if refresh_fn:
         refresh_fn()
-
+        
+def read_delay(path, fallback):
+    try:
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                val = f.read().strip()
+            return float(val)
+    except Exception:
+        pass
+    return fallback
 
 # ------------------------------------------------------------
 # digit helpers
@@ -187,6 +199,10 @@ def main():
         h, m, s = get_time()
         show_seconds = os.path.exists(SHOW_SECONDS_FILE)
 
+        # allow live tuning over SSH
+        minute_delay = read_delay(SNAKE_DELAY_FILE, SNAKE_DELAY)
+        second_delay = read_delay(SEC_SNAKE_DELAY_FILE, SEC_SNAKE_DELAY)
+
         # 🧪 SECONDS MODE: bottom shows seconds instead of minutes
         if show_seconds:
             # first time we enter seconds mode, just paint it
@@ -208,16 +224,16 @@ def main():
                 # seconds tens (0,14)
                 if new_tens != old_tens:
                     erase_digit_snake(0, 14, matrix.returnDigit(old_tens),
-                                      DISPLAY_INVERTED, delay=SEC_SNAKE_DELAY)
+                                      DISPLAY_INVERTED, delay=second_delay)
                     draw_digit_snake(0, 14, matrix.returnDigit(new_tens),
-                                     DISPLAY_INVERTED, delay=SEC_SNAKE_DELAY)
+                                     DISPLAY_INVERTED, delay=second_delay)
 
                 # seconds ones (14,14)
                 if new_ones != old_ones:
                     erase_digit_snake(14, 14, matrix.returnDigit(old_ones),
-                                      DISPLAY_INVERTED, delay=SEC_SNAKE_DELAY)
+                                      DISPLAY_INVERTED, delay=second_delay)
                     draw_digit_snake(14, 14, matrix.returnDigit(new_ones),
-                                     DISPLAY_INVERTED, delay=SEC_SNAKE_DELAY)
+                                     DISPLAY_INVERTED, delay=second_delay)
 
                 last_sec = s
 
@@ -251,16 +267,16 @@ def main():
             # minute tens (0,14)
             if new_tens != old_tens:
                 erase_digit_snake(0, 14, matrix.returnDigit(old_tens),
-                                  DISPLAY_INVERTED, delay=SNAKE_DELAY)
+                                  DISPLAY_INVERTED, delay=minute_delay)
                 draw_digit_snake(0, 14, matrix.returnDigit(new_tens),
-                                 DISPLAY_INVERTED, delay=SNAKE_DELAY)
+                                 DISPLAY_INVERTED, delay=minute_delay)
 
             # minute ones (14,14)
             if new_ones != old_ones:
                 erase_digit_snake(14, 14, matrix.returnDigit(old_ones),
-                                  DISPLAY_INVERTED, delay=SNAKE_DELAY)
+                                  DISPLAY_INVERTED, ddelay=minute_delay)
                 draw_digit_snake(14, 14, matrix.returnDigit(new_ones),
-                                 DISPLAY_INVERTED, delay=SNAKE_DELAY)
+                                 DISPLAY_INVERTED, delay=minute_delay)
 
             last_min = m
 
