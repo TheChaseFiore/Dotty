@@ -19,6 +19,7 @@ from multiprocessing import Process, Array
 #import cv2
 import numpy as np
 import random
+import os
 
 
 global rs232, panels
@@ -52,27 +53,27 @@ def main():
         panels.drawTxt(chat , 14)
         refresh()
     lm=0
-    while True:
-        clock = getTime()
-        h=clock[0]
-        m=clock[1]
-        panels.time(h,m)
-		if lm != m:  # only update once per min
-		    if m == 0:  # top of the hour
-		        # fancy random invert
-		        random_invert_animation(panels, refresh, delay=0.01, width=28, height=28)
-		
-		        # if you STILL want your old "chime" invert-by-hour effect,
-		        # you can run it AFTER the random wipe:
-		        # for ct in range(h):
-		        #     panels.invert()
-		        #     refresh()
-		        #     time.sleep(.5)
-		        # if h % 2 != 0:
-		        #     panels.invert()
-		
-		    refresh()
-		    lm = m
+	while True:
+	    clock = getTime()
+	    h = clock[0]
+	    m = clock[1]
+	    panels.time(h, m)
+	
+	    # normal once-a-minute logic
+	    if lm != m:
+	        if m == 0:
+	            random_invert_animation(panels, refresh, delay=0.01, width=28, height=28)
+	        refresh()
+	        lm = m
+	
+	    # 🔔 TEST TRIGGER: run animation if file exists
+	    if os.path.exists(TRIGGER_FILE):
+	        random_invert_animation(panels, refresh, delay=0.01, width=28, height=28)
+	        # remove it so it only runs once
+	        os.remove(TRIGGER_FILE)
+	
+	    time.sleep(0.1)
+
 
 def refresh(flaggs=True):
     serial_port.refresh(panels,rs232,flaggs)
@@ -123,20 +124,17 @@ def fps():
 		cv2.destroyAllWindows()"""
 
 def random_invert_animation(panels, refresh_fn, delay=0.01, width=28, height=28):
-    # 1. grab what’s currently on the display
+    # snapshot
     current = np.zeros((height, width), dtype=int)
     for y in range(height):
         for x in range(width):
+            # if you added panels.get(x,y)
             current[y, x] = panels.get(x, y)
 
-    # 2. compute the inverted target
     target = 1 - current
-
-    # 3. make a shuffled list of all pixel coords
     coords = [(x, y) for y in range(height) for x in range(width)]
     random.shuffle(coords)
 
-    # 4. walk through them one by one
     for (x, y) in coords:
         panels.draw(x, y, int(target[y, x]))
         refresh_fn()
