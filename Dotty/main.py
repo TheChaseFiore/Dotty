@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """
-Dotty main loop (advanced diff transitions + small-component coalescing)
+Dotty main loop (diff transitions, orphan-safe, simulated seconds mode)
 
 - 28x28 → 4 digits (HH on top, MM or SS on bottom)
-- /tmp/dotty_show_seconds → show seconds instead of minutes
-- /tmp/dotty_top_of_hour → force invert
-- /tmp/dotty_snake_delay → live minute speed
-- /tmp/dotty_sec_snake_delay → live seconds speed
+- /tmp/dotty_show_seconds → show *simulated* seconds (0..59..0), not wall-clock
+- /tmp/dotty_top_of_hour → force random invert + toggle polarity
+- /tmp/dotty_snake_delay → live minute animation speed
+- /tmp/dotty_sec_snake_delay → live seconds animation speed
 - /tmp/dotty_force_minute → force bottom animation now
 
-Transitions:
-- erase only what disappears
-- draw only what appears
-- do it per connected component (1 motion per shape)
-- AND now: tiny/orphan components get merged into nearest bigger stroke
+Key ideas:
+- transitions are diff-aware (only changed pixels)
+- transitions are per connected component (1 motion per shape)
+- tiny components (1–2 px) are drawn/erased in one go (no delay) → NO orphan blips
 """
 
 import os
@@ -46,7 +45,7 @@ DIGIT_SIZE = 14
 SNAKE_DELAY_DEFAULT = 0.06      # minute animation speed
 SEC_SNAKE_DELAY_DEFAULT = 0.02  # seconds animation speed
 
-# how small is “too small” to be its own stroke?
+# anything smaller than this is considered a "crumb" → draw with no delay
 MIN_COMPONENT_SIZE = 3
 
 # ---------------------------------------------------------------------
@@ -55,7 +54,8 @@ MIN_COMPONENT_SIZE = 3
 panels = matrix.matrix(4)
 rs232 = serial_port.initiate_serial()
 
-DISPLAY_INVERTED = False  # toggled at top-of-hour
+# toggled every top-of-hour
+DISPLAY_INVERTED = False
 
 
 # ---------------------------------------------------------------------
@@ -134,58 +134,47 @@ def mask_connected_components(mask):
 
 
 def order_component_pixels(comp):
-    """Draw a single component in a stable, non-jumpy order."""
+    """
+    Give a stable draw order for a single component.
+    We do top-to-bottom, then left-to-right so it's smooth.
+    """
     return sorted(comp, key=lambda p: (p[1], p[0]))
 
 
-def coalesce_small_components(comps, min_size=MIN_COMPONENT_SIZE):
+def play_component(dx, dy, comp, color, delay, tiny=False):
     """
-    If a component is too small (1–2 pixels), merge it into the nearest
-    bigger component so we don't get orphan strokes.
+    Draw/erase one component.
+    - if tiny=True → draw all pixels now, no delay → no orphan flicker
+    - else → one pixel at a time with delay
     """
-    if not comps:
-        return []
+    if tiny:
+        for (lx, ly) in comp:
+            panels.draw(dx + lx, dy + ly, color)
+        refresh()
+        return
 
-    big = [c for c in comps if len(c) >= min_size]
-    small = [c for c in comps if len(c) < min_size]
-
-    # if everything is small, just make one component
-    if not big:
-        merged = []
-        for c in comps:
-            merged.extend(c)
-        return [order_component_pixels(merged)]
-
-    # merge each small into the closest big
-    for s in small:
-        best_idx = 0
-        best_dist = 9999
-        for i, b in enumerate(big):
-            for (sx, sy) in s:
-                for (bx, by) in b:
-                    d = abs(sx - bx) + abs(sy - by)
-                    if d < best_dist:
-                        best_dist = d
-                        best_idx = i
-        big[best_idx].extend(s)
-
-    # order each final component
-    return [order_component_pixels(c) for c in big]
+    for (lx, ly) in comp:
+        panels.draw(dx + lx, dy + ly, color)
+        refresh()
+        time.sleep(delay)
 
 
 # ---------------------------------------------------------------------
-# ADVANCED DIFF-AWARE TRANSITION (with coalescing)
+# ADVANCED DIFF-AWARE TRANSITION (with tiny-component suppression)
 # ---------------------------------------------------------------------
 def advanced_digit_transition(dx, dy, old_mask, new_mask, inverted, delay):
     """
     Minimum-change transition:
-      - erase phase: old=1,new=0 → connected components → coalesce small → draw
-      - draw phase: old=0,new=1 → connected components → coalesce small → draw
+      - erase phase: old=1,new=0 → connected components
+      - draw phase: old=0,new=1 → connected components
+      - tiny components (1–2 px) are drawn/erased in one shot (no delay)
+        → this prevents "orphan dots"
+      - big components are played first so main stroke is visible
     """
     bg = 0 if not inverted else 1
     fg = 1 if not inverted else 0
 
-    # build diff masks
+    # 1) build diff masks
     erase_mask = [[0] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
     draw_mask = [[0] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
 
@@ -198,23 +187,22 @@ def advanced_digit_transition(dx, dy, old_mask, new_mask, inverted, delay):
             elif o == 0 and n == 1:
                 draw_mask[y][x] = 1
 
-    # ERASE PHASE
+    # 2) ERASE PHASE
     erase_comps = mask_connected_components(erase_mask)
-    erase_comps = coalesce_small_components(erase_comps, MIN_COMPONENT_SIZE)
+    # big first, small later
+    erase_comps.sort(key=len, reverse=True)
     for comp in erase_comps:
-        for (lx, ly) in comp:
-            panels.draw(dx + lx, dy + ly, bg)
-            refresh()
-            time.sleep(delay)
+        ordered = order_component_pixels(comp)
+        tiny = (len(ordered) < MIN_COMPONENT_SIZE)
+        play_component(dx, dy, ordered, bg, delay, tiny=tiny)
 
-    # DRAW PHASE
+    # 3) DRAW PHASE
     draw_comps = mask_connected_components(draw_mask)
-    draw_comps = coalesce_small_components(draw_comps, MIN_COMPONENT_SIZE)
+    draw_comps.sort(key=len, reverse=True)
     for comp in draw_comps:
-        for (lx, ly) in comp:
-            panels.draw(dx + lx, dy + ly, fg)
-            refresh()
-            time.sleep(delay)
+        ordered = order_component_pixels(comp)
+        tiny = (len(ordered) < MIN_COMPONENT_SIZE)
+        play_component(dx, dy, ordered, fg, delay, tiny=tiny)
 
 
 # ---------------------------------------------------------------------
@@ -277,15 +265,18 @@ def main():
 
     last_min = -1
     last_hour = -1
-    last_sec = -1
     prev_show_seconds = False
+
+    # this is our simulated seconds counter for debug mode
+    sec_sim = 0
 
     # initial draw
     h, m, s = get_time()
     draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
 
     while True:
-        h, m, s = get_time()
+        # get real time for hour/minute (top half always real)
+        h, m, _ = get_time()
         show_seconds = os.path.exists(SHOW_SECONDS_FILE)
 
         # live tunable speeds
@@ -293,61 +284,64 @@ def main():
         second_delay = read_delay(SEC_SNAKE_DELAY_FILE, SEC_SNAKE_DELAY_DEFAULT)
 
         # =========================================================
-        # SECONDS MODE
+        # SECONDS DEBUG MODE (simulated seconds 0..59..0)
         # =========================================================
         if show_seconds:
             if not prev_show_seconds:
-                draw_hours_and_bottom(h, s, DISPLAY_INVERTED)
-                last_sec = s
+                # enter seconds mode: start from 0 (or set to m%60, your choice)
+                sec_sim = 0
+                draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
                 prev_show_seconds = True
                 time.sleep(0.05)
                 continue
 
-            if s != last_sec:
-                old_s = last_sec
-                old_tens = old_s // 10
-                old_ones = old_s % 10
-                new_tens = s // 10
-                new_ones = s % 10
+            # animate from previous simulated second to next
+            old_s = sec_sim
+            sec_sim = (sec_sim + 1) % 60
+            new_s = sec_sim
 
-                # seconds tens
-                if new_tens != old_tens:
-                    advanced_digit_transition(
-                        0, 14,
-                        matrix.returnDigit(old_tens),
-                        matrix.returnDigit(new_tens),
-                        DISPLAY_INVERTED,
-                        delay=second_delay,
-                    )
-                # seconds ones
-                if new_ones != old_ones:
-                    advanced_digit_transition(
-                        14, 14,
-                        matrix.returnDigit(old_ones),
-                        matrix.returnDigit(new_ones),
-                        DISPLAY_INVERTED,
-                        delay=second_delay,
-                    )
+            old_tens = old_s // 10
+            old_ones = old_s % 10
+            new_tens = new_s // 10
+            new_ones = new_s % 10
 
-                last_sec = s
+            # seconds tens
+            if new_tens != old_tens:
+                advanced_digit_transition(
+                    0, 14,
+                    matrix.returnDigit(old_tens),
+                    matrix.returnDigit(new_tens),
+                    DISPLAY_INVERTED,
+                    delay=second_delay,
+                )
 
-            # allow invert in seconds
+            # seconds ones
+            if new_ones != old_ones:
+                advanced_digit_transition(
+                    14, 14,
+                    matrix.returnDigit(old_ones),
+                    matrix.returnDigit(new_ones),
+                    DISPLAY_INVERTED,
+                    delay=second_delay,
+                )
+
+            # still in seconds mode → allow manual invert
             if os.path.exists(TRIGGER_INVERT_FILE):
                 random_invert_animation(panels, refresh,
                                         delay=0.01,
                                         width=WIDTH, height=HEIGHT)
                 DISPLAY_INVERTED = not DISPLAY_INVERTED
-                draw_hours_and_bottom(h, s, DISPLAY_INVERTED)
+                draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
                 os.remove(TRIGGER_INVERT_FILE)
 
+            # small pause so you can see it
             time.sleep(0.05)
             continue
 
-        # leaving seconds → restore minutes
+        # leaving seconds mode → go back to minutes
         if prev_show_seconds:
             draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
             prev_show_seconds = False
-            last_sec = -1
 
         # =========================================================
         # FORCE-MINUTE TEST
