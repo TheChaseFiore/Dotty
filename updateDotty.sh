@@ -1,3 +1,5 @@
+#located at sudo nano /usr/local/bin/run-dotty.sh
+
 #!/bin/bash
 set -e
 
