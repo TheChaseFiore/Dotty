@@ -43,7 +43,7 @@ WIDTH = 28
 HEIGHT = 28
 DIGIT_SIZE = 14
 
-SNAKE_DELAY_DEFAULT = 0.06      # minute animation speed
+SNAKE_DELAY_DEFAULT = 0.02      # minute animation speed
 SEC_SNAKE_DELAY_DEFAULT = 0.02  # seconds animation speed
 
 # anything smaller than this is drawn in one go (no delay) to avoid blips
