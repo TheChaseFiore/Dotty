@@ -166,7 +166,7 @@ def main():
             time.sleep(0.1)
             continue
 
-          if m != last_min:
+        if m != last_min:
             old_m = last_min if last_min >= 0 else m
             old_tens = old_m // 10
             old_ones = old_m % 10
