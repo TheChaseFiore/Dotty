@@ -74,43 +74,102 @@ def read_delay(path, fallback):
 # ------------------------------------------------------------
 def make_digit_runs(mask):
     """
-    Return runs in a deterministic, snakey order:
-      1. all horizontal strokes, top -> bottom, left -> right
-      2. then all vertical strokes, left -> right, top -> bottom
-    (no sorting by length, so parallel-looking strokes won’t happen)
-    """
-    consumed = [[False] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
-    runs = []
+    Build runs, then order them so each new run tries to start from
+    something we've already drawn.
 
-    # 1) horizontal first (top → bottom)
-    for y in range(DIGIT_SIZE):
+    Rules:
+      1. collect horizontals, then verticals (to keep shapes nice)
+      2. pick a starting run = top-most, then left-most
+      3. for each next run:
+         - prefer a run that TOUCHES what we already drew
+         - if it touches with its *last* point, reverse it
+         - if nothing touches (rare), just take the next one
+    This makes digits like 0, 4, 3 look hand-drawn (no parallel rails).
+    """
+    DIG = DIGIT_SIZE  # 14
+    # 1) collect all runs (same as before)
+    tmp_runs = []
+    consumed = [[False] * DIG for _ in range(DIG)]
+
+    # horizontals first
+    for y in range(DIG):
         x = 0
-        while x < DIGIT_SIZE:
+        while x < DIG:
             if mask[y][x] == 1 and not consumed[y][x]:
-                pixels = []
-                while x < DIGIT_SIZE and mask[y][x] == 1 and not consumed[y][x]:
+                run = []
+                while x < DIG and mask[y][x] == 1 and not consumed[y][x]:
                     consumed[y][x] = True
-                    pixels.append((x, y))
+                    run.append((x, y))
                     x += 1
-                runs.append(pixels)
+                tmp_runs.append(run)
             else:
                 x += 1
 
-    # 2) vertical for leftovers (left → right)
-    for x in range(DIGIT_SIZE):
+    # verticals for leftovers
+    for x in range(DIG):
         y = 0
-        while y < DIGIT_SIZE:
+        while y < DIG:
             if mask[y][x] == 1 and not consumed[y][x]:
-                pixels = []
-                while y < DIGIT_SIZE and mask[y][x] == 1 and not consumed[y][x]:
+                run = []
+                while y < DIG and mask[y][x] == 1 and not consumed[y][x]:
                     consumed[y][x] = True
-                    pixels.append((x, y))
+                    run.append((x, y))
                     y += 1
-                runs.append(pixels)
+                tmp_runs.append(run)
             else:
                 y += 1
 
-    return runs
+    if not tmp_runs:
+        return []
+
+    # little helper: does a point touch anything we've drawn?
+    def touches_drawn(pt, drawn):
+        x, y = pt
+        # 4-neighbor + itself
+        for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
+            if (x + dx, y + dy) in drawn:
+                return True
+        return False
+
+    # 2) pick starting run = earliest on screen (top-most, then left-most)
+    start_idx = min(
+        range(len(tmp_runs)),
+        key=lambda i: (tmp_runs[i][0][1], tmp_runs[i][0][0])
+    )
+    ordered = [tmp_runs.pop(start_idx)]
+    drawn = set(ordered[0])
+
+    # 3) keep picking the next run that touches what we already drew
+    while tmp_runs:
+        picked_idx = None
+        picked_run = None
+
+        for i, run in enumerate(tmp_runs):
+            first = run[0]
+            last = run[-1]
+            first_touches = touches_drawn(first, drawn)
+            last_touches = touches_drawn(last, drawn)
+
+            if first_touches or last_touches:
+                # take this one
+                picked_idx = i
+                picked_run = run
+                # if it connects at the *end*, reverse it so we draw from the connection
+                if (not first_touches) and last_touches:
+                    picked_run = list(reversed(picked_run))
+                break
+
+        if picked_idx is None:
+            # no run touched — just pop one to avoid infinite loop
+            picked_run = tmp_runs.pop(0)
+        else:
+            tmp_runs.pop(picked_idx)
+
+        ordered.append(picked_run)
+        drawn.update(picked_run)
+
+    return ordered
+
 
 def erase_digit_snake(dx, dy, old_mask, inverted, delay):
     bg = 0 if not inverted else 1
