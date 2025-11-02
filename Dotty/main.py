@@ -1,44 +1,29 @@
 #!/usr/bin/env python3
-#   Package     Version
-#   pyserial    3.5
-
-__author__ = "Chase Fiore"
-__copyright__ = "Copyright 2025, Chase Fiore"
-__license__ = "GPL"
-__version__ = "0.0"
-__email__ = "chasefiore@gmail.com"
-__status__ = "Production"
 
 import os
 import time
 import random
 from datetime import datetime
-from multiprocessing import Process, Array
+from multiprocessing import Process
 
 import numpy as np
 
 import serial_port
 import matrix
 
-# ---------------------------------------------------------------------------
-# CONFIG
-# ---------------------------------------------------------------------------
 TRIGGER_FILE = "/tmp/dotty_top_of_hour"
 WIDTH = 28
 HEIGHT = 28
 
-# ---------------------------------------------------------------------------
-# INIT DISPLAY
-# ---------------------------------------------------------------------------
-panels = matrix.matrix(4)              # make matrix with X panels
-rs232 = serial_port.initiate_serial()  # initiate serial com2
+# hardware
+panels = matrix.matrix(4)
+rs232 = serial_port.initiate_serial()
+
+# this is the new hour-to-hour toggle
+DISPLAY_INVERTED = False
 
 
-# ---------------------------------------------------------------------------
-# BASIC HELPERS
-# ---------------------------------------------------------------------------
-def refresh(flaggs: bool = True):
-    """Send current panel buffer out the serial port."""
+def refresh(flaggs=True):
     serial_port.refresh(panels, rs232, flaggs)
 
 
@@ -51,66 +36,28 @@ def get_time():
     ]
 
 
-def get_pixel(panels_obj, x, y):
-    """Try to read a pixel from the matrix; fall back to 0 if not supported."""
-    if hasattr(panels_obj, "get"):
-        return panels_obj.get(x, y)
-    # fallback: if matrix doesn't expose read, assume 0
-    return 0
-
-
-# ---------------------------------------------------------------------------
-# SCREEN SNAPSHOT / DRAW HELPERS
-# ---------------------------------------------------------------------------
 def capture_screen(panels_obj, width=WIDTH, height=HEIGHT):
     buf = np.zeros((height, width), dtype=int)
-    for yy in range(height):
-        for xx in range(width):
-            buf[yy, xx] = get_pixel(panels_obj, xx, yy)
+    for y in range(height):
+        for x in range(width):
+            # your matrix now has a working .get(x, y)
+            buf[y, x] = panels_obj.get(x, y)
     return buf
 
 
 def draw_buffer(panels_obj, buf, refresh_fn=None):
     h, w = buf.shape
-    for yy in range(h):
-        for xx in range(w):
-            panels_obj.draw(xx, yy, int(buf[yy, xx]))
+    for y in range(h):
+        for x in range(w):
+            panels_obj.draw(x, y, int(buf[y, x]))
     if refresh_fn:
         refresh_fn()
 
 
-def build_time_frame(panels_obj, refresh_fn, h, m, width=WIDTH, height=HEIGHT):
-    """
-    Build what the time *should* look like, without permanently changing the display.
-    """
-    # 1. save current screen
-    current = capture_screen(panels_obj, width, height)
-
-    # 2. draw time
-    panels_obj.clear()
-    panels_obj.time(h, m)
-    refresh_fn()
-
-    # 3. capture as target
-    target = capture_screen(panels_obj, width, height)
-
-    # 4. restore original
-    draw_buffer(panels_obj, current, refresh_fn)
-
-    return target
-
-
-# ---------------------------------------------------------------------------
-# ANIMATIONS
-# ---------------------------------------------------------------------------
 def random_invert_animation(panels_obj, refresh_fn, delay=0.01,
                             width=WIDTH, height=HEIGHT):
-    """
-    Randomly flip pixels until the whole screen is inverted from its current state.
-    """
-    # capture current screen
     current = capture_screen(panels_obj, width, height)
-    target = 1 - current  # invert
+    target = 1 - current  # invert everything
 
     coords = [(x, y) for y in range(height) for x in range(width)]
     random.shuffle(coords)
@@ -121,135 +68,67 @@ def random_invert_animation(panels_obj, refresh_fn, delay=0.01,
         time.sleep(delay)
 
 
-def matrix_rain_reveal(panels_obj, refresh_fn, target_frame,
-                       width=WIDTH, height=HEIGHT,
-                       frames=120, spawn_chance=0.25,
-                       frame_delay=0.04):
+def draw_time_in_mode(h, m, inverted: bool):
     """
-    Matrix/rain style animation that gradually turns the current screen
-    into target_frame.
+    Draws the time, but if inverted==True, we draw the inverted time buffer
+    so the whole hour stays in that “polarity.”
     """
-    # start from whatever is on screen right now
-    current_frame = capture_screen(panels_obj, width, height)
+    # first, draw normal time into the panel buffer
+    panels.clear()
+    panels.time(h, m)
 
-    # falling drops: list of {"x": int, "y": int}
-    drops = []
+    if not inverted:
+        # normal mode, we're done
+        return
 
-    for _ in range(frames):
-        # if we already match the target, we can stop early
-        if np.array_equal(current_frame, target_frame):
-            break
-
-        # maybe spawn new drops at top
-        for col in range(width):
-            if random.random() < spawn_chance:
-                drops.append({"x": col, "y": 0})
-
-        # copy current frame to mutate
-        new_frame = np.array(current_frame, copy=True)
-
-        new_drops = []
-        for d in drops:
-            x = d["x"]
-            y = d["y"]
-
-            # when the drop passes over (x,y), "reveal" target there
-            new_frame[y, x] = target_frame[y, x]
-
-            # move drop down
-            y += 1
-            if y < height:
-                d["y"] = y
-                new_drops.append(d)
-            # else: drop is off-screen
-
-        drops = new_drops
-        current_frame = new_frame
-
-        # draw to hardware
-        draw_buffer(panels_obj, current_frame, refresh_fn)
-        time.sleep(frame_delay)
-
-    # make sure we end exactly on target
-    draw_buffer(panels_obj, target_frame, refresh_fn)
+    # inverted mode: capture what we just drew, invert it, and write it back
+    buf = capture_screen(panels, WIDTH, HEIGHT)
+    inv = 1 - buf
+    draw_buffer(panels, inv, None)
 
 
-def show_time(panels_obj, refresh_fn, h, m):
-    panels_obj.clear()
-    panels_obj.time(h, m)
-    refresh_fn()
-
-
-# ---------------------------------------------------------------------------
-# FPS PROCESS (your original)
-# ---------------------------------------------------------------------------
 def fps():
     while True:
         get_time()
         refresh(True)
-        time.sleep(1 / 60)  # 60 Hz refresh
+        time.sleep(1 / 60)
 
 
-# ---------------------------------------------------------------------------
-# MAIN LOOP
-# ---------------------------------------------------------------------------
 def main():
-    last_min = 0
+    global DISPLAY_INVERTED
 
+    last_min = -1
     while True:
         h, m, s = get_time()
 
-        # normal steady state: show current time
-        panels.time(h, m)
+        # always draw clock in current mode
+        draw_time_in_mode(h, m, DISPLAY_INVERTED)
+        refresh()
 
         # run once per minute
         if m != last_min:
-            if m == 0:  # top of hour
-                # 1) chaos
+            if m == 0:
+                # 1) fun animation
                 random_invert_animation(panels, refresh,
                                         delay=0.01,
                                         width=WIDTH, height=HEIGHT)
+                # 2) flip display mode so the next draws stay inverted
+                DISPLAY_INVERTED = not DISPLAY_INVERTED
 
-                # 2) figure out what the time screen should look like
-                target = build_time_frame(panels, refresh, h, m,
-                                          width=WIDTH, height=HEIGHT)
-
-                # 3) reveal the time through matrix rain
-                matrix_rain_reveal(panels, refresh, target,
-                                   width=WIDTH, height=HEIGHT,
-                                   frames=140,
-                                   spawn_chance=0.25,
-                                   frame_delay=0.04)
-
-            refresh()
             last_min = m
 
-        # SSH trigger: same sequence
+        # SSH trigger: do the same sequence
         if os.path.exists(TRIGGER_FILE):
             random_invert_animation(panels, refresh,
                                     delay=0.01,
                                     width=WIDTH, height=HEIGHT)
-            target = build_time_frame(panels, refresh, h, m,
-                                      width=WIDTH, height=HEIGHT)
-            matrix_rain_reveal(panels, refresh, target,
-                               width=WIDTH, height=HEIGHT,
-                               frames=140,
-                               spawn_chance=0.25,
-                               frame_delay=0.04)
+            DISPLAY_INVERTED = not DISPLAY_INVERTED
             os.remove(TRIGGER_FILE)
 
         time.sleep(0.1)
 
 
-# ---------------------------------------------------------------------------
-# ENTRY
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    # if you want the fps process, uncomment these:
     # p = Process(target=fps)
     # p.start()
-
-    # p2 = Process(target=main)
-    # p2.start()
-
     main()
