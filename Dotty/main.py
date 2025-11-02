@@ -46,7 +46,7 @@ SNAKE_DELAY_DEFAULT = 0.06      # minute animation speed
 SEC_SNAKE_DELAY_DEFAULT = 0.02  # seconds animation speed
 
 # anything smaller than this is considered a "crumb" → draw with no delay
-MIN_COMPONENT_SIZE = 4
+MIN_COMPONENT_SIZE = 2
 
 # ---------------------------------------------------------------------
 # HARDWARE
