@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Dotty main loop (diff transitions, orphan-safe, simulated seconds mode)
+Dotty main loop (stroke-based transitions, no diff skipping,
+simulated seconds for debugging)
 
 - 28x28 → 4 digits (HH on top, MM or SS on bottom)
 - /tmp/dotty_show_seconds → show *simulated* seconds (0..59..0), not wall-clock
@@ -9,10 +10,10 @@ Dotty main loop (diff transitions, orphan-safe, simulated seconds mode)
 - /tmp/dotty_sec_snake_delay → live seconds animation speed
 - /tmp/dotty_force_minute → force bottom animation now
 
-Key ideas:
-- transitions are diff-aware (only changed pixels)
-- transitions are per connected component (1 motion per shape)
-- tiny components (1–2 px) are drawn/erased in one go (no delay) → NO orphan blips
+Key point in this version:
+➡️ If a pixel is part of the OLD digit’s shape, we animate it (erase it),
+   even if the NEW digit also uses it. Then we draw the NEW digit.
+   This prevents “orphan” pixels that never got animated.
 """
 
 import os
@@ -45,8 +46,8 @@ DIGIT_SIZE = 14
 SNAKE_DELAY_DEFAULT = 0.06      # minute animation speed
 SEC_SNAKE_DELAY_DEFAULT = 0.02  # seconds animation speed
 
-# anything smaller than this is considered a "crumb" → draw with no delay
-MIN_COMPONENT_SIZE = 2
+# anything smaller than this is drawn in one go (no delay) to avoid blips
+MIN_COMPONENT_SIZE = 3
 
 # ---------------------------------------------------------------------
 # HARDWARE
@@ -135,8 +136,8 @@ def mask_connected_components(mask):
 
 def order_component_pixels(comp):
     """
-    Give a stable draw order for a single component.
-    We do top-to-bottom, then left-to-right so it's smooth.
+    Stable order for one component.
+    Top-to-bottom, then left-to-right is fine for a 14x14 glyph.
     """
     return sorted(comp, key=lambda p: (p[1], p[0]))
 
@@ -144,8 +145,8 @@ def order_component_pixels(comp):
 def play_component(dx, dy, comp, color, delay, tiny=False):
     """
     Draw/erase one component.
-    - if tiny=True → draw all pixels now, no delay → no orphan flicker
-    - else → one pixel at a time with delay
+    - tiny=True → draw whole component instantly (no orphan flicker)
+    - else → 1 pixel at a time
     """
     if tiny:
         for (lx, ly) in comp:
@@ -160,48 +161,44 @@ def play_component(dx, dy, comp, color, delay, tiny=False):
 
 
 # ---------------------------------------------------------------------
-# ADVANCED DIFF-AWARE TRANSITION (with tiny-component suppression)
+# STROKE-BASED TRANSITION  👈 important change
 # ---------------------------------------------------------------------
-def advanced_digit_transition(dx, dy, old_mask, new_mask, inverted, delay):
+def stroke_digit_transition(dx, dy, old_mask, new_mask, inverted, delay):
     """
-    Minimum-change transition:
-      - erase phase: old=1,new=0 → connected components
-      - draw phase: old=0,new=1 → connected components
-      - tiny components (1–2 px) are drawn/erased in one shot (no delay)
-        → this prevents "orphan dots"
-      - big components are played first so main stroke is visible
+    Stroke-based animation:
+
+    1. ERASE PHASE
+       - build components from the *old* digit ONLY
+       - walk each component
+       - for every pixel in that component: ERASE it to background
+         (EVEN IF the new digit also wants that pixel)
+       → this guarantees no shared pixel survives in the middle
+
+    2. DRAW PHASE
+       - build components from the *new* digit ONLY
+       - walk each component
+       - draw to foreground
+
+    Tiny components are drawn in one go to avoid 1px blips.
     """
     bg = 0 if not inverted else 1
     fg = 1 if not inverted else 0
 
-    # 1) build diff masks
-    erase_mask = [[0] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
-    draw_mask = [[0] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
-
-    for y in range(DIGIT_SIZE):
-        for x in range(DIGIT_SIZE):
-            o = old_mask[y][x]
-            n = new_mask[y][x]
-            if o == 1 and n == 0:
-                erase_mask[y][x] = 1
-            elif o == 0 and n == 1:
-                draw_mask[y][x] = 1
-
-    # 2) ERASE PHASE
-    erase_comps = mask_connected_components(erase_mask)
-    # big first, small later
+    # ---- ERASE PHASE (old digit) ----
+    erase_comps = mask_connected_components(old_mask)
+    # big→small so main stroke first
     erase_comps.sort(key=len, reverse=True)
     for comp in erase_comps:
         ordered = order_component_pixels(comp)
-        tiny = (len(ordered) < MIN_COMPONENT_SIZE)
+        tiny = len(ordered) < MIN_COMPONENT_SIZE
         play_component(dx, dy, ordered, bg, delay, tiny=tiny)
 
-    # 3) DRAW PHASE
-    draw_comps = mask_connected_components(draw_mask)
+    # ---- DRAW PHASE (new digit) ----
+    draw_comps = mask_connected_components(new_mask)
     draw_comps.sort(key=len, reverse=True)
     for comp in draw_comps:
         ordered = order_component_pixels(comp)
-        tiny = (len(ordered) < MIN_COMPONENT_SIZE)
+        tiny = len(ordered) < MIN_COMPONENT_SIZE
         play_component(dx, dy, ordered, fg, delay, tiny=tiny)
 
 
@@ -267,7 +264,7 @@ def main():
     last_hour = -1
     prev_show_seconds = False
 
-    # this is our simulated seconds counter for debug mode
+    # simulated seconds for debug mode
     sec_sim = 0
 
     # initial draw
@@ -275,7 +272,7 @@ def main():
     draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
 
     while True:
-        # get real time for hour/minute (top half always real)
+        # real time for hours/min
         h, m, _ = get_time()
         show_seconds = os.path.exists(SHOW_SECONDS_FILE)
 
@@ -284,18 +281,16 @@ def main():
         second_delay = read_delay(SEC_SNAKE_DELAY_FILE, SEC_SNAKE_DELAY_DEFAULT)
 
         # =========================================================
-        # SECONDS DEBUG MODE (simulated seconds 0..59..0)
+        # SECONDS DEBUG MODE (simulated 0..59..0)
         # =========================================================
         if show_seconds:
             if not prev_show_seconds:
-                # enter seconds mode: start from 0 (or set to m%60, your choice)
                 sec_sim = 0
                 draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
                 prev_show_seconds = True
                 time.sleep(0.05)
                 continue
 
-            # animate from previous simulated second to next
             old_s = sec_sim
             sec_sim = (sec_sim + 1) % 60
             new_s = sec_sim
@@ -307,7 +302,7 @@ def main():
 
             # seconds tens
             if new_tens != old_tens:
-                advanced_digit_transition(
+                stroke_digit_transition(
                     0, 14,
                     matrix.returnDigit(old_tens),
                     matrix.returnDigit(new_tens),
@@ -317,7 +312,7 @@ def main():
 
             # seconds ones
             if new_ones != old_ones:
-                advanced_digit_transition(
+                stroke_digit_transition(
                     14, 14,
                     matrix.returnDigit(old_ones),
                     matrix.returnDigit(new_ones),
@@ -325,7 +320,7 @@ def main():
                     delay=second_delay,
                 )
 
-            # still in seconds mode → allow manual invert
+            # allow invert in seconds mode
             if os.path.exists(TRIGGER_INVERT_FILE):
                 random_invert_animation(panels, refresh,
                                         delay=0.01,
@@ -334,11 +329,11 @@ def main():
                 draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
                 os.remove(TRIGGER_INVERT_FILE)
 
-            # small pause so you can see it
+            # short pause so you can watch it
             time.sleep(0.05)
             continue
 
-        # leaving seconds mode → go back to minutes
+        # leaving seconds mode → restore minutes
         if prev_show_seconds:
             draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
             prev_show_seconds = False
@@ -349,14 +344,14 @@ def main():
         if os.path.exists(FORCE_MINUTE_FILE):
             tens = m // 10
             ones = m % 10
-            advanced_digit_transition(
+            stroke_digit_transition(
                 0, 14,
                 matrix.returnDigit(tens),
                 matrix.returnDigit(tens),
                 DISPLAY_INVERTED,
                 delay=minute_delay,
             )
-            advanced_digit_transition(
+            stroke_digit_transition(
                 14, 14,
                 matrix.returnDigit(ones),
                 matrix.returnDigit(ones),
@@ -384,7 +379,7 @@ def main():
 
             # minute tens
             if new_tens != old_tens:
-                advanced_digit_transition(
+                stroke_digit_transition(
                     0, 14,
                     matrix.returnDigit(old_tens),
                     matrix.returnDigit(new_tens),
@@ -394,7 +389,7 @@ def main():
 
             # minute ones
             if new_ones != old_ones:
-                advanced_digit_transition(
+                stroke_digit_transition(
                     14, 14,
                     matrix.returnDigit(old_ones),
                     matrix.returnDigit(new_ones),
@@ -404,7 +399,7 @@ def main():
 
             last_min = m
 
-            # hour may have changed too
+            # hour might have changed too
             if h != last_hour:
                 draw_hours_only(h, DISPLAY_INVERTED)
                 last_hour = h
