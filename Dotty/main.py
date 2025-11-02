@@ -155,27 +155,23 @@ def main():
 
         # run once per minute
         if m != last_min:
-            if m == 0:
-                # 1) fun animation
-                random_invert_animation(panels, refresh,
-                                        delay=0.01,
-                                        width=WIDTH, height=HEIGHT)
-                # 2) flip display mode so the next draws stay inverted
-                DISPLAY_INVERTED = not DISPLAY_INVERTED
-
-            last_min = m
-
-        if os.path.exists(TRIGGER_FILE):
-            random_invert_animation(...)
-            DISPLAY_INVERTED = not DISPLAY_INVERTED
             transition_to_time_pixelwise(
                 panels,
                 refresh,
                 h,
                 m,
                 inverted=DISPLAY_INVERTED,
-                per_pixel_delay=0.005,
+                per_pixel_delay=0.001,
             )
+            last_min = m
+
+
+        # SSH trigger: do the same sequence
+        if os.path.exists(TRIGGER_FILE):
+            random_invert_animation(panels, refresh,
+                                    delay=0.01,
+                                    width=WIDTH, height=HEIGHT)
+            DISPLAY_INVERTED = not DISPLAY_INVERTED
             os.remove(TRIGGER_FILE)
 
 
