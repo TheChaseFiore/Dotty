@@ -21,59 +21,77 @@ import numpy as np
 import random
 import os
 
+TRIGGER_FILE = "/tmp/dotty_top_of_hour"
 
 global rs232, panels
 panels = matrix.matrix(4)#make matrix with X panels
 rs232 = serial_port.initiate_serial() #initiate serial com2
 
 def main():
-    color=1
-    if 1==2:
+    color = 1
+
+    # test blocks you keep disabled
+    if 1 == 2:
         refresh()
         for y in range(28):
             for x in range(28):
                 refresh()
-                panels.draw(x,y,color)
+                panels.draw(x, y, color)
         if color == 1:
             color = 0
         else:
             color = 1
 
-    if 1==2:
+    if 1 == 2:
         for ct in range(500):
-            x = random.randint(0,27)
-            y = random.randint(0,27)
-            color = random.randint(0,1)
-            panels.draw(x,y,color)
+            x = random.randint(0, 27)
+            y = random.randint(0, 27)
+            color = random.randint(0, 1)
+            panels.draw(x, y, color)
         refresh()
 
-    while 1==2:
-        chat = input("Text")
-        panels.clear()
-        panels.drawTxt(chat , 14)
-        refresh()
-    lm=0
-	while True:
-	    clock = getTime()
-	    h = clock[0]
-	    m = clock[1]
-	    panels.time(h, m)
-	
-	    # normal once-a-minute logic
-	    if lm != m:
-	        if m == 0:
-	            random_invert_animation(panels, refresh, delay=0.01, width=28, height=28)
-	        refresh()
-	        lm = m
-	
-	    # 🔔 TEST TRIGGER: run animation if file exists
-	    if os.path.exists(TRIGGER_FILE):
-	        random_invert_animation(panels, refresh, delay=0.01, width=28, height=28)
-	        # remove it so it only runs once
-	        os.remove(TRIGGER_FILE)
-	
-	    time.sleep(0.1)
+    # text test
+    if 1 == 2:
+        while True:
+            chat = input("Text")
+            panels.clear()
+            panels.drawTxt(chat, 14)
+            refresh()
 
+    lm = 0
+    while True:
+        clock = getTime()
+        h = clock[0]
+        m = clock[1]
+
+        panels.time(h, m)
+
+        # normal once-a-minute logic
+        if lm != m:
+            if m == 0:
+                random_invert_animation(
+                    panels,
+                    refresh,
+                    delay=0.01,
+                    width=28,
+                    height=28,
+                )
+            refresh()
+            lm = m
+
+        # 🔔 TEST TRIGGER: run animation if file exists
+        if os.path.exists(TRIGGER_FILE):
+            random_invert_animation(
+                panels,
+                refresh,
+                delay=0.01,
+                width=28,
+                height=28,
+            )
+            # remove it so it only runs once
+            os.remove(TRIGGER_FILE)
+
+        time.sleep(0.1)
 
 def refresh(flaggs=True):
     serial_port.refresh(panels,rs232,flaggs)
