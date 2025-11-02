@@ -1,0 +1,14 @@
+# show seconds
+touch /tmp/dotty_show_seconds
+
+# hide seconds
+rm /tmp/dotty_show_seconds
+
+# force the minute animation right now
+touch /tmp/dotty_force_minute
+
+# toggle display / test top-of-hour
+touch /tmp/dotty_top_of_hour
+
+# slow down minute animation
+echo 0.25 | sudo tee /tmp/dotty_snake_delay
