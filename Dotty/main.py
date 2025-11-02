@@ -11,11 +11,12 @@ import serial_port
 import matrix
 
 TRIGGER_FILE = "/tmp/dotty_top_of_hour"
+SHOW_SECONDS_FILE = "/tmp/dotty_show_seconds"
+
 WIDTH = 28
 HEIGHT = 28
 DIGIT_SIZE = 14
-SNAKE_DELAY = 0.01  # 👈 change this to speed up/slow down
-SHOW_SECONDS_FILE = "/tmp/dotty_show_seconds"
+SNAKE_DELAY = 0.09  # 👈 change this to speed up/slow down
 
 # hardware
 panels = matrix.matrix(4)
@@ -95,13 +96,12 @@ def make_digit_runs(mask):
 
 
 def erase_digit_snake(dx, dy, old_mask, inverted, delay=SNAKE_DELAY):
-    # ✅ FIX: correct background
+    # correct background
     bg = 0 if not inverted else 1
 
     runs = make_digit_runs(old_mask)
     for run in runs:
         for (lx, ly) in run:
-            # only erase pixels that were ON in the old digit
             if old_mask[ly][lx] == 1:
                 panels.draw(dx + lx, dy + ly, bg)
                 refresh()
@@ -109,7 +109,7 @@ def erase_digit_snake(dx, dy, old_mask, inverted, delay=SNAKE_DELAY):
 
 
 def draw_digit_snake(dx, dy, new_mask, inverted, delay=SNAKE_DELAY):
-    # ✅ FIX: correct foreground
+    # correct foreground
     fg = 1 if not inverted else 0
 
     runs = make_digit_runs(new_mask)
@@ -136,6 +136,46 @@ def random_invert_animation(panels_obj, refresh_fn,
         time.sleep(delay)
 
 
+def draw_hours_only(h, inverted):
+    d1 = h // 10
+    d2 = h % 10
+    panels.frame(matrix.returnDigit(d1), 0, 0)
+    panels.frame(matrix.returnDigit(d2), 14, 0)
+    if inverted:
+        for y in range(14):
+            for x in range(28):
+                val = panels.get(x, y)
+                panels.draw(x, y, 1 - val)
+    refresh()
+
+
+def draw_hours_and_bottom(h, bottom_val, inverted):
+    """
+    Draw 4 digits on the 28x28:
+    top 2 = hours
+    bottom 2 = bottom_val (minutes or seconds)
+    """
+    panels.clear()
+
+    # hours
+    d1 = h // 10
+    d2 = h % 10
+    panels.frame(matrix.returnDigit(d1), 0, 0)
+    panels.frame(matrix.returnDigit(d2), 14, 0)
+
+    # bottom
+    b1 = bottom_val // 10
+    b2 = bottom_val % 10
+    panels.frame(matrix.returnDigit(b1), 0, 14)
+    panels.frame(matrix.returnDigit(b2), 14, 14)
+
+    if inverted:
+        buf = capture_screen(panels)
+        draw_buffer(panels, 1 - buf)
+    else:
+        refresh()
+
+
 # ------------------------------------------------------------
 # main loop
 # ------------------------------------------------------------
@@ -144,28 +184,29 @@ def main():
 
     last_min = -1
     last_hour = -1
+    prev_show_seconds = False
 
-    # initial paint
+    # initial paint (hours + minutes)
     h, m, s = get_time()
-    panels.clear()
-    panels.time(h, m)
-    refresh()
+    draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
 
     while True:
         h, m, s = get_time()
+        show_seconds = os.path.exists(SHOW_SECONDS_FILE)
 
-        # 🧪 test mode: show seconds if file exists
-        if os.path.exists(SHOW_SECONDS_FILE):
-            panels.clear()
-            panels.time(h, m, s)   # you already have time(h,m,s=0) in matrix
-            if DISPLAY_INVERTED:
-                buf = capture_screen(panels)
-                draw_buffer(panels, 1 - buf)
-            else:
-                refresh()
+        # 🧪 test mode: show SECONDS instead of MINUTES
+        if show_seconds:
+            draw_hours_and_bottom(h, s, DISPLAY_INVERTED)
+            prev_show_seconds = True
             time.sleep(0.1)
             continue
+        else:
+            # we were in seconds mode, now stop → restore minutes
+            if prev_show_seconds:
+                draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
+                prev_show_seconds = False
 
+        # normal minute-driven mode
         if m != last_min:
             old_m = last_min if last_min >= 0 else m
             old_tens = old_m // 10
@@ -196,15 +237,9 @@ def main():
 
             last_min = m
 
-            # hour might have changed at 59→00, so refresh top half instantly
+            # hour might have changed at 59→00 → refresh TOP ONLY
             if h != last_hour:
-                panels.clear()
-                panels.time(h, m)
-                if DISPLAY_INVERTED:
-                    buf = capture_screen(panels)
-                    draw_buffer(panels, 1 - buf)
-                else:
-                    refresh()
+                draw_hours_only(h, DISPLAY_INVERTED)
                 last_hour = h
 
         # SSH trigger: flip polarity now
@@ -213,14 +248,8 @@ def main():
                                     delay=0.01,
                                     width=WIDTH, height=HEIGHT)
             DISPLAY_INVERTED = not DISPLAY_INVERTED
-            # redraw current time in new polarity
-            panels.clear()
-            panels.time(h, m)
-            if DISPLAY_INVERTED:
-                buf = capture_screen(panels)
-                draw_buffer(panels, 1 - buf)
-            else:
-                refresh()
+            # redraw current time in new polarity (minutes on bottom)
+            draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
             os.remove(TRIGGER_FILE)
 
         time.sleep(0.1)
