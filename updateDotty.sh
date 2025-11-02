@@ -2,7 +2,7 @@
 
 # --- Configuration ---
 REPO_URL="https://github.com/TheChaseFiore/Dotty"
-REPO_DIR="/opt/Dotty"
+REPO_DIR="/Dotty"
 PYTHON_SCRIPT="Dotty/main.py"   # Change to your script name
 PYTHON_BIN="/usr/bin/python3"  # Adjust if needed
 
