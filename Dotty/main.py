@@ -53,6 +53,54 @@ def draw_buffer(panels_obj, buf, refresh_fn=None):
     if refresh_fn:
         refresh_fn()
 
+def build_time_frame_raw(panels_obj, h, m, width=WIDTH, height=HEIGHT):
+    """
+    Draw the time, capture it, and return the buffer.
+    This does NOT restore the old screen — it's the 'raw' version.
+    """
+    panels_obj.clear()
+    panels_obj.time(h, m)
+    refresh(False)
+    buf = capture_screen(panels_obj, width, height)
+    return buf
+    
+def transition_to_time_pixelwise(panels_obj, refresh_fn, h, m,
+                                 inverted: bool,
+                                 width=WIDTH, height=HEIGHT,
+                                 per_pixel_delay=0.01,
+                                 shuffle=True):
+    """
+    Transition from whatever is currently on screen to the time (h:m)
+    one pixel at a time.
+    If `inverted` is True, we invert the target frame before applying.
+    """
+    # 1) what we have right now
+    current = capture_screen(panels_obj, width, height)
+
+    # 2) what the time should look like (normal)
+    target = build_time_frame_raw(panels_obj, h, m, width, height)
+
+    # if we're in inverted mode for this hour, invert the target
+    if inverted:
+        target = 1 - target
+
+    # 3) figure out which pixels need to change
+    diffs = []
+    for y in range(height):
+        for x in range(width):
+            if current[y, x] != target[y, x]:
+                diffs.append((x, y))
+
+    # optionally randomize order
+    if shuffle:
+        random.shuffle(diffs)
+
+    # 4) walk them
+    for (x, y) in diffs:
+        panels_obj.draw(x, y, int(target[y, x]))
+        refresh_fn()
+        if per_pixel_delay > 0:
+            time.sleep(per_pixel_delay)
 
 def random_invert_animation(panels_obj, refresh_fn, delay=0.01,
                             width=WIDTH, height=HEIGHT):
@@ -117,13 +165,27 @@ def main():
 
             last_min = m
 
-        # SSH trigger: do the same sequence
+     """   # SSH trigger: do the same sequence
         if os.path.exists(TRIGGER_FILE):
             random_invert_animation(panels, refresh,
                                     delay=0.01,
                                     width=WIDTH, height=HEIGHT)
             DISPLAY_INVERTED = not DISPLAY_INVERTED
+            os.remove(TRIGGER_FILE)"""
+
+        if os.path.exists(TRIGGER_FILE):
+            random_invert_animation(...)
+            DISPLAY_INVERTED = not DISPLAY_INVERTED
+            transition_to_time_pixelwise(
+                panels,
+                refresh,
+                h,
+                m,
+                inverted=DISPLAY_INVERTED,
+                per_pixel_delay=0.005,
+            )
             os.remove(TRIGGER_FILE)
+
 
         time.sleep(0.1)
 
