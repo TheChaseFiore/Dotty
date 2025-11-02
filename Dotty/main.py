@@ -4,7 +4,6 @@ import os
 import time
 import random
 from datetime import datetime
-from multiprocessing import Process
 
 import numpy as np
 
@@ -19,7 +18,7 @@ HEIGHT = 28
 panels = matrix.matrix(4)
 rs232 = serial_port.initiate_serial()
 
-# this is the new hour-to-hour toggle
+# toggle every hour
 DISPLAY_INVERTED = False
 
 
@@ -40,7 +39,6 @@ def capture_screen(panels_obj, width=WIDTH, height=HEIGHT):
     buf = np.zeros((height, width), dtype=int)
     for y in range(height):
         for x in range(width):
-            # your matrix now has a working .get(x, y)
             buf[y, x] = panels_obj.get(x, y)
     return buf
 
@@ -53,132 +51,123 @@ def draw_buffer(panels_obj, buf, refresh_fn=None):
     if refresh_fn:
         refresh_fn()
 
-def build_time_frame_raw(panels_obj, h, m, width=WIDTH, height=HEIGHT):
-    """
-    Draw the time, capture it, and return the buffer.
-    This does NOT restore the old screen — it's the 'raw' version.
-    """
+
+def build_time_frame(panels_obj, h, m, inverted, width=WIDTH, height=HEIGHT):
+    """Return a 28x28 numpy array of what the time SHOULD look like."""
     panels_obj.clear()
     panels_obj.time(h, m)
     refresh(False)
-    buf = capture_screen(panels_obj, width, height)
-    return buf
-    
-def transition_to_time_pixelwise(panels_obj, refresh_fn, h, m,
-                                 inverted: bool,
-                                 width=WIDTH, height=HEIGHT,
-                                 per_pixel_delay=0.01,
-                                 shuffle=True):
-    """
-    Transition from whatever is currently on screen to the time (h:m)
-    one pixel at a time.
-    If `inverted` is True, we invert the target frame before applying.
-    """
-    # 1) what we have right now
-    current = capture_screen(panels_obj, width, height)
-
-    # 2) what the time should look like (normal)
-    target = build_time_frame_raw(panels_obj, h, m, width, height)
-
-    # if we're in inverted mode for this hour, invert the target
+    tgt = capture_screen(panels_obj, width, height)
     if inverted:
-        target = 1 - target
+        tgt = 1 - tgt
+    return tgt
 
-    # 3) figure out which pixels need to change
+
+def transition_frame_pixelwise(panels_obj, refresh_fn,
+                               current_frame, target_frame,
+                               per_pixel_delay=0.005,
+                               shuffle=True):
+    """ONLY change the pixels that are different."""
+    height, width = current_frame.shape
     diffs = []
     for y in range(height):
         for x in range(width):
-            if current[y, x] != target[y, x]:
+            if current_frame[y, x] != target_frame[y, x]:
                 diffs.append((x, y))
 
-    # optionally randomize order
     if shuffle:
         random.shuffle(diffs)
 
-    # 4) walk them
     for (x, y) in diffs:
-        panels_obj.draw(x, y, int(target[y, x]))
+        panels_obj.draw(x, y, int(target_frame[y, x]))
         refresh_fn()
         if per_pixel_delay > 0:
             time.sleep(per_pixel_delay)
 
-def random_invert_animation(panels_obj, refresh_fn, delay=0.01,
-                            width=WIDTH, height=HEIGHT):
-    current = capture_screen(panels_obj, width, height)
-    target = 1 - current  # invert everything
 
+def random_invert_animation(panels_obj, refresh_fn,
+                            delay=0.01, width=WIDTH, height=HEIGHT):
+    current = capture_screen(panels_obj, width, height)
+    target = 1 - current
     coords = [(x, y) for y in range(height) for x in range(width)]
     random.shuffle(coords)
-
     for (x, y) in coords:
         panels_obj.draw(x, y, int(target[y, x]))
         refresh_fn()
         time.sleep(delay)
 
 
-def draw_time_in_mode(h, m, inverted: bool):
-    """
-    Draws the time, but if inverted==True, we draw the inverted time buffer
-    so the whole hour stays in that “polarity.”
-    """
-    # first, draw normal time into the panel buffer
-    panels.clear()
-    panels.time(h, m)
-
-    if not inverted:
-        # normal mode, we're done
-        return
-
-    # inverted mode: capture what we just drew, invert it, and write it back
-    buf = capture_screen(panels, WIDTH, HEIGHT)
-    inv = 1 - buf
-    draw_buffer(panels, inv, None)
-
-
-def fps():
-    while True:
-        get_time()
-        refresh(True)
-        time.sleep(1 / 60)
-
-
 def main():
     global DISPLAY_INVERTED
 
     last_min = -1
+    # draw the very first time screen
+    h, m, s = get_time()
+    panels.clear()
+    panels.time(h, m)
+    refresh()
+    # capture that as our starting frame
+    prev_frame = capture_screen(panels)
+
     while True:
         h, m, s = get_time()
 
-        # always draw clock in current mode
-        draw_time_in_mode(h, m, DISPLAY_INVERTED)
-        refresh()
-
-        # run once per minute
+        # minute just changed
         if m != last_min:
-            transition_to_time_pixelwise(
+            # top of hour: do the sparkle + flip polarity
+            if m == 0:
+                random_invert_animation(panels, refresh,
+                                        delay=0.01,
+                                        width=WIDTH, height=HEIGHT)
+                DISPLAY_INVERTED = not DISPLAY_INVERTED
+                # very important: after invert, THIS is our prev frame
+                prev_frame = capture_screen(panels)
+
+            # 1) build what the NEW time should look like (in correct polarity)
+            target_frame = build_time_frame(panels, h, m, DISPLAY_INVERTED,
+                                            width=WIDTH, height=HEIGHT)
+
+            # 2) put the OLD frame back on screen, so we can animate from it
+            draw_buffer(panels, prev_frame, refresh)
+
+            # 3) animate ONLY the changed pixels
+            transition_frame_pixelwise(
                 panels,
                 refresh,
-                h,
-                m,
-                inverted=DISPLAY_INVERTED,
-                per_pixel_delay=0.001,
+                prev_frame,
+                target_frame,
+                per_pixel_delay=0.002,
+                shuffle=True,
             )
+
+            # 4) remember the new frame for next minute
+            prev_frame = target_frame
             last_min = m
 
-
-        # SSH trigger: do the same sequence
+        # SSH trigger: do the hour thing right now
         if os.path.exists(TRIGGER_FILE):
             random_invert_animation(panels, refresh,
                                     delay=0.01,
                                     width=WIDTH, height=HEIGHT)
             DISPLAY_INVERTED = not DISPLAY_INVERTED
+            # after a manual invert, we want time in the new polarity too
+            target_frame = build_time_frame(panels, h, m, DISPLAY_INVERTED,
+                                            width=WIDTH, height=HEIGHT)
+            draw_buffer(panels, prev_frame, refresh)
+            transition_frame_pixelwise(
+                panels,
+                refresh,
+                prev_frame,
+                target_frame,
+                per_pixel_delay=0.002,
+                shuffle=True,
+            )
+            prev_frame = target_frame
             os.remove(TRIGGER_FILE)
 
-
+        # small sleep, we don’t need sub-ms loop
         time.sleep(0.1)
 
 
 if __name__ == "__main__":
-    # p = Process(target=fps)
-    # p.start()
     main()
