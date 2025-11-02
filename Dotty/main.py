@@ -166,46 +166,38 @@ def main():
             time.sleep(0.1)
             continue
 
-        if m != last_min:
-            # detect which minute digits changed
+          if m != last_min:
             old_m = last_min if last_min >= 0 else m
             old_tens = old_m // 10
             old_ones = old_m % 10
-
             new_tens = m // 10
             new_ones = m % 10
 
-            # top of hour: do the invert and flip mode FIRST
+            # top of hour: invert whole display and flip mode
             if m == 0:
                 random_invert_animation(panels, refresh,
                                         delay=0.01,
                                         width=WIDTH, height=HEIGHT)
                 DISPLAY_INVERTED = not DISPLAY_INVERTED
 
-            # now animate minute digits that changed
-            # bottom-left digit (minute tens) at (0,14)
+            # minute tens (0,14)
             if new_tens != old_tens:
-                old_mask = matrix.returnDigit(old_tens)
-                new_mask = matrix.returnDigit(new_tens)
-                # erase old
-                erase_digit_snake(0, 14, old_mask, DISPLAY_INVERTED, delay=SNAKE_DELAY)
-                # draw new
-                draw_digit_snake(0, 14, new_mask, DISPLAY_INVERTED, delay=SNAKE_DELAY)
+                erase_digit_snake(0, 14, matrix.returnDigit(old_tens),
+                                  DISPLAY_INVERTED, delay=SNAKE_DELAY)
+                draw_digit_snake(0, 14, matrix.returnDigit(new_tens),
+                                 DISPLAY_INVERTED, delay=SNAKE_DELAY)
 
-            # bottom-right digit (minute ones) at (14,14)
+            # minute ones (14,14)
             if new_ones != old_ones:
-                old_mask = matrix.returnDigit(old_ones)
-                new_mask = matrix.returnDigit(new_ones)
-                erase_digit_snake(14, 14, old_mask, DISPLAY_INVERTED, delay=SNAKE_DELAY)
-                draw_digit_snake(14, 14, new_mask, DISPLAY_INVERTED, delay=SNAKE_DELAY)
+                erase_digit_snake(14, 14, matrix.returnDigit(old_ones),
+                                  DISPLAY_INVERTED, delay=SNAKE_DELAY)
+                draw_digit_snake(14, 14, matrix.returnDigit(new_ones),
+                                 DISPLAY_INVERTED, delay=SNAKE_DELAY)
 
-            # update minute marker
             last_min = m
 
-            # after animating, make sure the hours are right too
-            # (hour might have changed at 59->00)
+            # hour might have changed at 59→00, so refresh top half instantly
             if h != last_hour:
-                # redraw hours in current polarity, but INSTANT (not animated)
                 panels.clear()
                 panels.time(h, m)
                 if DISPLAY_INVERTED:
