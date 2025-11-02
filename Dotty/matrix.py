@@ -24,6 +24,9 @@ class matrix:
     def len(self):
         return len(self.panel)
 
+    def get(self, x, y):
+        return self.panel[y][x]
+
     def invert(self):
         for panel in self.panel:
             for ct in range(28):
