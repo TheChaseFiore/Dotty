@@ -2,17 +2,13 @@
 """
 Dotty main loop
 
-Features:
-- 28x28 layout → 4 digits:
-    (0, 0)  -> hour tens
-    (14, 0) -> hour ones
-    (0, 14) -> minute/second tens
-    (14,14) -> minute/second ones
-- normal mode: bottom shows minutes
-- test mode (touch /tmp/dotty_show_seconds): bottom shows seconds
-- top-of-hour: random invert + toggle display polarity
-- snake-style transitions for digits
-- live SSH tuning of animation speeds
+- 28x28 → 4 digits (top = hours, bottom = minutes/seconds)
+- /tmp/dotty_show_seconds → bottom shows seconds
+- /tmp/dotty_top_of_hour → force invert + redraw
+- /tmp/dotty_snake_delay → live minute speed
+- /tmp/dotty_sec_snake_delay → live seconds speed
+- /tmp/dotty_force_minute → test the minute animation right now
+- minute/second transitions are now DIFF-AWARE (minimum pixels flipped)
 """
 
 import os
@@ -26,13 +22,12 @@ import serial_port
 import matrix
 
 # ---------------------------------------------------------------------
-# PATH TRIGGERS
+# FILE TRIGGERS
 # ---------------------------------------------------------------------
 TRIGGER_INVERT_FILE = "/tmp/dotty_top_of_hour"
 SHOW_SECONDS_FILE = "/tmp/dotty_show_seconds"
 FORCE_MINUTE_FILE = "/tmp/dotty_force_minute"
 
-# live-tunable delays
 SNAKE_DELAY_FILE = "/tmp/dotty_snake_delay"
 SEC_SNAKE_DELAY_FILE = "/tmp/dotty_sec_snake_delay"
 
@@ -43,17 +38,16 @@ WIDTH = 28
 HEIGHT = 28
 DIGIT_SIZE = 14
 
-# baked-in defaults (can be overridden by files above)
 SNAKE_DELAY_DEFAULT = 0.06      # minute animation speed
 SEC_SNAKE_DELAY_DEFAULT = 0.02  # seconds animation speed
 
 # ---------------------------------------------------------------------
-# HARDWARE INIT
+# HARDWARE
 # ---------------------------------------------------------------------
 panels = matrix.matrix(4)
 rs232 = serial_port.initiate_serial()
 
-# this flips each time we reach minute == 0
+# top-of-hour toggle
 DISPLAY_INVERTED = False
 
 
@@ -61,12 +55,10 @@ DISPLAY_INVERTED = False
 # BASIC HELPERS
 # ---------------------------------------------------------------------
 def refresh(flaggs=True):
-    """Push buffer to hardware."""
     serial_port.refresh(panels, rs232, flaggs)
 
 
 def get_time():
-    """Return (H, M, S) as ints."""
     now = datetime.now()
     return [
         int(now.strftime("%H")),
@@ -76,7 +68,6 @@ def get_time():
 
 
 def capture_screen(panels_obj, width=WIDTH, height=HEIGHT):
-    """Read current panel state into a numpy array (height x width)."""
     buf = np.zeros((height, width), dtype=int)
     for y in range(height):
         for x in range(width):
@@ -85,7 +76,6 @@ def capture_screen(panels_obj, width=WIDTH, height=HEIGHT):
 
 
 def draw_buffer(panels_obj, buf, refresh_fn=None):
-    """Write a numpy buffer back to the panel."""
     h, w = buf.shape
     for y in range(h):
         for x in range(w):
@@ -95,7 +85,6 @@ def draw_buffer(panels_obj, buf, refresh_fn=None):
 
 
 def read_delay(path, fallback):
-    """Allow live SSH tuning: echo 0.2 > /tmp/dotty_snake_delay."""
     try:
         if os.path.exists(path):
             with open(path, "r") as f:
@@ -107,21 +96,19 @@ def read_delay(path, fallback):
 
 
 # ---------------------------------------------------------------------
-# DIGIT → RUNS (adjacency-driven so it looks hand-drawn)
+# DIGIT → SNAKE RUNS (adjacency-driven)
 # ---------------------------------------------------------------------
 def make_digit_runs(mask):
     """
-    Build runs (strokes) from a 14x14 digit, and then order them so that
-    each new run tries to start from something we already drew.
-
-    This prevents the two vertical rails of digits like 0 and 4 from
-    appearing “in parallel”, and makes 3 draw from the right spine outward.
+    Build runs from a 14x14 mask, but order them so each new run tries to
+    start from something we already drew. Keeps 0/4 from drawing both rails
+    in parallel and makes 3 draw from the spine outward.
     """
     DIG = DIGIT_SIZE
     tmp_runs = []
     consumed = [[False] * DIG for _ in range(DIG)]
 
-    # 1) collect horizontals, top → bottom
+    # 1) horizontals first (top → bottom)
     for y in range(DIG):
         x = 0
         while x < DIG:
@@ -135,7 +122,7 @@ def make_digit_runs(mask):
             else:
                 x += 1
 
-    # 2) collect verticals, left → right (for leftover pixels)
+    # 2) verticals for leftovers (left → right)
     for x in range(DIG):
         y = 0
         while y < DIG:
@@ -152,16 +139,15 @@ def make_digit_runs(mask):
     if not tmp_runs:
         return []
 
-    # helper: does this pixel touch anything we drew?
+    # helper: does point touch anything we've already drawn?
     def touches_drawn(pt, drawn):
         x, y = pt
-        # self + 4-neighbors
         for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
             if (x + dx, y + dy) in drawn:
                 return True
         return False
 
-    # pick the earliest (top-most, then left-most) run as our starting run
+    # start with earliest run on screen
     start_idx = min(
         range(len(tmp_runs)),
         key=lambda i: (tmp_runs[i][0][1], tmp_runs[i][0][0])
@@ -169,7 +155,7 @@ def make_digit_runs(mask):
     ordered = [tmp_runs.pop(start_idx)]
     drawn = set(ordered[0])
 
-    # repeatedly pick the run that touches what we have
+    # greedily add runs that touch what we've drawn
     while tmp_runs:
         picked_idx = None
         picked_run = None
@@ -183,13 +169,13 @@ def make_digit_runs(mask):
             if first_touches or last_touches:
                 picked_idx = i
                 picked_run = run
-                # if it connects at the *end*, reverse so we draw from the connection point
+                # if it connects at the end, reverse so we draw from the connection
                 if (not first_touches) and last_touches:
                     picked_run = list(reversed(picked_run))
                 break
 
         if picked_idx is None:
-            # nothing touched: just pop one to avoid infinite loop
+            # nothing touched — just take the next one
             picked_run = tmp_runs.pop(0)
         else:
             tmp_runs.pop(picked_idx)
@@ -200,28 +186,52 @@ def make_digit_runs(mask):
     return ordered
 
 
-def erase_digit_snake(dx, dy, old_mask, inverted, delay):
-    """Erase one digit (14x14) at (dx,dy) in a snakey, connected order."""
+# ---------------------------------------------------------------------
+# DIFF-AWARE SNAKE TRANSITION  👈 NEW SMART VERSION
+# ---------------------------------------------------------------------
+def snake_digit_transition(dx, dy, old_mask, new_mask, inverted, delay):
+    """
+    Smart, minimum-change snake:
+      - walk a connected path built from (old OR new)
+      - at each pixel:
+          old=1, new=0 → erase
+          old=0, new=1 → draw
+          else → skip
+    So we only flip the pixels that *actually* changed.
+    """
     bg = 0 if not inverted else 1
-    runs = make_digit_runs(old_mask)
-    for run in runs:
-        for (lx, ly) in run:
-            if old_mask[ly][lx] == 1:
-                panels.draw(dx + lx, dy + ly, bg)
-                refresh()
-                time.sleep(delay)
-
-
-def draw_digit_snake(dx, dy, new_mask, inverted, delay):
-    """Draw one digit (14x14) at (dx,dy) in a snakey, connected order."""
     fg = 1 if not inverted else 0
-    runs = make_digit_runs(new_mask)
+    DIG = DIGIT_SIZE
+
+    # union: places we might need to touch
+    union_mask = [
+        [
+            1 if (old_mask[y][x] == 1 or new_mask[y][x] == 1) else 0
+            for x in range(DIG)
+        ]
+        for y in range(DIG)
+    ]
+
+    runs = make_digit_runs(union_mask)
+
     for run in runs:
         for (lx, ly) in run:
-            if new_mask[ly][lx] == 1:
-                panels.draw(dx + lx, dy + ly, fg)
-                refresh()
-                time.sleep(delay)
+            old_val = old_mask[ly][lx]
+            new_val = new_mask[ly][lx]
+
+            # no change needed
+            if old_val == new_val:
+                continue
+
+            # change needed
+            if new_val == 1:
+                color = fg
+            else:
+                color = bg
+
+            panels.draw(dx + lx, dy + ly, color)
+            refresh()
+            time.sleep(delay)
 
 
 # ---------------------------------------------------------------------
@@ -229,7 +239,6 @@ def draw_digit_snake(dx, dy, new_mask, inverted, delay):
 # ---------------------------------------------------------------------
 def random_invert_animation(panels_obj, refresh_fn,
                             delay=0.01, width=WIDTH, height=HEIGHT):
-    """Invert every pixel in a random order."""
     current = capture_screen(panels_obj, width, height)
     target = 1 - current
     coords = [(x, y) for y in range(height) for x in range(width)]
@@ -244,7 +253,6 @@ def random_invert_animation(panels_obj, refresh_fn,
 # DRAWING CONVENIENCE
 # ---------------------------------------------------------------------
 def draw_hours_only(h, inverted):
-    """Redraw just the top two digits (HH)."""
     d1 = h // 10
     d2 = h % 10
     panels.frame(matrix.returnDigit(d1), 0, 0)
@@ -258,16 +266,15 @@ def draw_hours_only(h, inverted):
 
 
 def draw_hours_and_bottom(h, bottom_val, inverted):
-    """Draw 4 digits: HH on top, bottom_val on bottom."""
     panels.clear()
 
-    # hours (top)
+    # top
     d1 = h // 10
     d2 = h % 10
     panels.frame(matrix.returnDigit(d1), 0, 0)
     panels.frame(matrix.returnDigit(d2), 14, 0)
 
-    # bottom (minutes or seconds)
+    # bottom
     b1 = bottom_val // 10
     b2 = bottom_val % 10
     panels.frame(matrix.returnDigit(b1), 0, 14)
@@ -291,32 +298,30 @@ def main():
     last_sec = -1
     prev_show_seconds = False
 
-    # initial draw: HH:MM
+    # initial draw
     h, m, s = get_time()
     draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
 
     while True:
         h, m, s = get_time()
+        show_seconds = os.path.exists(SHOW_SECONDS_FILE)
 
-        # allow live SSH speed tweaks
+        # live tuning
         minute_delay = read_delay(SNAKE_DELAY_FILE, SNAKE_DELAY_DEFAULT)
         second_delay = read_delay(SEC_SNAKE_DELAY_FILE, SEC_SNAKE_DELAY_DEFAULT)
 
-        show_seconds = os.path.exists(SHOW_SECONDS_FILE)
-
-        # ---------------------------------------------------------
-        # SECONDS MODE: bottom shows seconds instead of minutes
-        # ---------------------------------------------------------
+        # =========================================================
+        # SECONDS MODE
+        # =========================================================
         if show_seconds:
             if not prev_show_seconds:
-                # first frame in seconds mode
+                # first frame entering seconds mode
                 draw_hours_and_bottom(h, s, DISPLAY_INVERTED)
                 last_sec = s
                 prev_show_seconds = True
                 time.sleep(0.05)
                 continue
 
-            # seconds ticked → animate just the bottom digit(s)
             if s != last_sec:
                 old_s = last_sec
                 old_tens = old_s // 10
@@ -326,21 +331,27 @@ def main():
 
                 # seconds tens
                 if new_tens != old_tens:
-                    erase_digit_snake(0, 14, matrix.returnDigit(old_tens),
-                                      DISPLAY_INVERTED, delay=second_delay)
-                    draw_digit_snake(0, 14, matrix.returnDigit(new_tens),
-                                     DISPLAY_INVERTED, delay=second_delay)
+                    snake_digit_transition(
+                        0, 14,
+                        matrix.returnDigit(old_tens),
+                        matrix.returnDigit(new_tens),
+                        DISPLAY_INVERTED,
+                        delay=second_delay,
+                    )
 
                 # seconds ones
                 if new_ones != old_ones:
-                    erase_digit_snake(14, 14, matrix.returnDigit(old_ones),
-                                      DISPLAY_INVERTED, delay=second_delay)
-                    draw_digit_snake(14, 14, matrix.returnDigit(new_ones),
-                                     DISPLAY_INVERTED, delay=second_delay)
+                    snake_digit_transition(
+                        14, 14,
+                        matrix.returnDigit(old_ones),
+                        matrix.returnDigit(new_ones),
+                        DISPLAY_INVERTED,
+                        delay=second_delay,
+                    )
 
                 last_sec = s
 
-            # still in seconds mode, but let SSH invert work
+            # allow invert even in seconds mode
             if os.path.exists(TRIGGER_INVERT_FILE):
                 random_invert_animation(panels, refresh,
                                         delay=0.01,
@@ -352,35 +363,37 @@ def main():
             time.sleep(0.05)
             continue
 
-        # ---------------------------------------------------------
-        # we were in seconds mode but not anymore → restore minutes
-        # ---------------------------------------------------------
+        # leaving seconds mode → restore minutes
         if prev_show_seconds:
             draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
             prev_show_seconds = False
-            last_sec = -1  # reset
+            last_sec = -1
 
-        # ---------------------------------------------------------
-        # FORCE-MINUTE trigger: test snake without waiting a minute
-        # ---------------------------------------------------------
+        # =========================================================
+        # FORCE-MINUTE TEST (for SSH)
+        # =========================================================
         if os.path.exists(FORCE_MINUTE_FILE):
             tens = m // 10
             ones = m % 10
-            erase_digit_snake(0, 14, matrix.returnDigit(tens),
-                              DISPLAY_INVERTED, delay=minute_delay)
-            draw_digit_snake(0, 14, matrix.returnDigit(tens),
-                             DISPLAY_INVERTED, delay=minute_delay)
-
-            erase_digit_snake(14, 14, matrix.returnDigit(ones),
-                              DISPLAY_INVERTED, delay=minute_delay)
-            draw_digit_snake(14, 14, matrix.returnDigit(ones),
-                             DISPLAY_INVERTED, delay=minute_delay)
-
+            snake_digit_transition(
+                0, 14,
+                matrix.returnDigit(tens),
+                matrix.returnDigit(tens),
+                DISPLAY_INVERTED,
+                delay=minute_delay,
+            )
+            snake_digit_transition(
+                14, 14,
+                matrix.returnDigit(ones),
+                matrix.returnDigit(ones),
+                DISPLAY_INVERTED,
+                delay=minute_delay,
+            )
             os.remove(FORCE_MINUTE_FILE)
 
-        # ---------------------------------------------------------
+        # =========================================================
         # NORMAL MINUTE MODE
-        # ---------------------------------------------------------
+        # =========================================================
         if m != last_min:
             old_m = last_min if last_min >= 0 else m
             old_tens = old_m // 10
@@ -388,37 +401,43 @@ def main():
             new_tens = m // 10
             new_ones = m % 10
 
-            # top-of-hour: random invert + toggle mode
+            # top-of-hour
             if m == 0:
                 random_invert_animation(panels, refresh,
                                         delay=0.01,
                                         width=WIDTH, height=HEIGHT)
                 DISPLAY_INVERTED = not DISPLAY_INVERTED
 
-            # minute tens (0,14)
+            # minute tens
             if new_tens != old_tens:
-                erase_digit_snake(0, 14, matrix.returnDigit(old_tens),
-                                  DISPLAY_INVERTED, delay=minute_delay)
-                draw_digit_snake(0, 14, matrix.returnDigit(new_tens),
-                                 DISPLAY_INVERTED, delay=minute_delay)
+                snake_digit_transition(
+                    0, 14,
+                    matrix.returnDigit(old_tens),
+                    matrix.returnDigit(new_tens),
+                    DISPLAY_INVERTED,
+                    delay=minute_delay,
+                )
 
-            # minute ones (14,14)
+            # minute ones
             if new_ones != old_ones:
-                erase_digit_snake(14, 14, matrix.returnDigit(old_ones),
-                                  DISPLAY_INVERTED, delay=minute_delay)
-                draw_digit_snake(14, 14, matrix.returnDigit(new_ones),
-                                 DISPLAY_INVERTED, delay=minute_delay)
+                snake_digit_transition(
+                    14, 14,
+                    matrix.returnDigit(old_ones),
+                    matrix.returnDigit(new_ones),
+                    DISPLAY_INVERTED,
+                    delay=minute_delay,
+                )
 
             last_min = m
 
-            # hour might have changed too → redraw top only
+            # hour might have changed too
             if h != last_hour:
                 draw_hours_only(h, DISPLAY_INVERTED)
                 last_hour = h
 
-        # ---------------------------------------------------------
-        # SSH INVERT TRIGGER (works in normal minute mode)
-        # ---------------------------------------------------------
+        # =========================================================
+        # SSH INVERT TRIGGER
+        # =========================================================
         if os.path.exists(TRIGGER_INVERT_FILE):
             random_invert_animation(panels, refresh,
                                     delay=0.01,
@@ -430,6 +449,5 @@ def main():
         time.sleep(0.1)
 
 
-# ---------------------------------------------------------------------
 if __name__ == "__main__":
     main()
