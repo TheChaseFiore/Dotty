@@ -20,11 +20,11 @@ import os
 import time
 import random
 from datetime import datetime
-
 import numpy as np
-
 import serial_port
 import matrix
+from math import floor, ceil
+from collections import deque
 
 # ---------------------------------------------------------------------
 # FILE TRIGGERS
@@ -161,7 +161,7 @@ def play_component(dx, dy, comp, color, delay, tiny=False):
 
 
 # ---------------------------------------------------------------------
-# STROKE-BASED TRANSITION  👈 important change
+# STROKE-BASED TRANSITION
 # ---------------------------------------------------------------------
 def stroke_digit_transition(dx, dy, old_mask, new_mask, inverted, delay):
     """
@@ -216,6 +216,116 @@ def random_invert_animation(panels_obj, refresh_fn,
         refresh_fn()
         time.sleep(delay)
 
+# ---------------------------------------------------------------------
+# --- Stroke utilities for 14x14 glyphs (or any W,H) ---
+# ---------------------------------------------------------------------
+
+def bresenham_line(x0, y0, x1, y1):
+    """Integer Bresenham line: yields (x,y) along the straight segment."""
+    x0, y0, x1, y1 = int(round(x0)), int(round(y0)), int(round(x1)), int(round(y1))
+    dx = abs(x1 - x0)
+    sx = 1 if x0 < x1 else -1
+    dy = -abs(y1 - y0)
+    sy = 1 if y0 < y1 else -1
+    err = dx + dy
+    x, y = x0, y0
+    out = []
+    while True:
+        out.append((x, y))
+        if x == x1 and y == y1:
+            break
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x += sx
+        if e2 <= dx:
+            err += dx
+            y += sy
+    return out
+
+def expand_thickness(pixel_list, thickness=1, bounds=(28,28)):
+    """Expand each pixel to a square radius for thickness. Remove duplicates, clamp to bounds."""
+    w, h = bounds
+    out = set()
+    r = max(0, int((thickness-1)//2))
+    # if thickness==1 => r=0 -> no expansion
+    for (x,y) in pixel_list:
+        for dx in range(-r, r+1):
+            for dy in range(-r, r+1):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < w and 0 <= ny < h:
+                    out.add((nx, ny))
+    # return as a list (but ordering will be recomputed)
+    return list(out)
+
+def stroke_to_ordered_pixels(stroke, thickness=1, bounds=(28,28)):
+    """
+    stroke: sequence of points [(x0,y0),(x1,y1),...]
+    returns: ordered list of unique pixel coords following stroke path
+    """
+    # collect along each segment
+    pts = []
+    pts_set = set()
+    for a, b in zip(stroke, stroke[1:]):
+        seg = bresenham_line(a[0], a[1], b[0], b[1])
+        for p in seg:
+            if p not in pts_set:
+                pts.append(p)
+                pts_set.add(p)
+    # expand thickness around each point, preserving rough order by expanding per-centroid
+    if thickness <= 1:
+        return pts
+    # expand but create an ordered list: for each center pixel in pts, append neighbors (if not present)
+    ordered = []
+    seen = set()
+    for (cx, cy) in pts:
+        for dx in range(-thickness//2, thickness//2 + 1):
+            for dy in range(-thickness//2, thickness//2 + 1):
+                nx, ny = cx + dx, cy + dy
+                if 0 <= nx < bounds[0] and 0 <= ny < bounds[1]:
+                    if (nx, ny) not in seen:
+                        ordered.append((nx, ny))
+                        seen.add((nx, ny))
+    return ordered
+
+# play stroke to hardware
+def play_stroke(panels_obj, stroke_pixels, color, refresh_fn, per_pixel_delay=0.01, instant_threshold=3):
+    """
+    stroke_pixels: ordered list of pixels for this stroke
+    color: 0 or 1
+    instant_threshold: if len <= this, draw instantly (avoid orphan flicker)
+    """
+    if len(stroke_pixels) <= instant_threshold:
+        for (x,y) in stroke_pixels:
+            panels_obj.draw(x, y, color)
+        refresh_fn()
+        return
+    for (x,y) in stroke_pixels:
+        panels_obj.draw(x, y, color)
+        refresh_fn()
+        time.sleep(per_pixel_delay)
+
+# transition helper: erase all old strokes (in reverse order recommended), then draw new
+def transition_by_strokes(panels_obj, old_strokes, new_strokes, refresh_fn,
+                          thickness=1, erase_first=True, per_pixel_delay=0.01,
+                          bounds=(28,28), inverted=False):
+    """
+    old_strokes/new_strokes: lists of strokes. Each stroke = [(x0,y0),(x1,y1),...]
+    erase_first: if True, erase old strokes first (recommended)
+    inverted: whether current display is inverted (affects bg/fg)
+    """
+    bg = 0 if not inverted else 1
+    fg = 1 if not inverted else 0
+
+    # ERASE PHASE (walk old stroke list in reverse to feel natural)
+    for stroke in reversed(old_strokes):
+        pixels = stroke_to_ordered_pixels(stroke, thickness=thickness, bounds=bounds)
+        play_stroke(panels_obj, pixels, bg, refresh_fn, per_pixel_delay)
+
+    # DRAW PHASE
+    for stroke in new_strokes:
+        pixels = stroke_to_ordered_pixels(stroke, thickness=thickness, bounds=bounds)
+        play_stroke(panels_obj, pixels, fg, refresh_fn, per_pixel_delay)
 
 # ---------------------------------------------------------------------
 # DRAWING
