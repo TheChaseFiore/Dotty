@@ -212,68 +212,70 @@ def transition_by_strokes(panels_obj, old_strokes, new_strokes,
 # Authorable. Tweak endpoints to taste.
 # Each digit: list of strokes (stroke = list of points)
 # ---------------------------
+# digit_strokes (derived from your 14x14 bitmaps)
 digit_strokes = {
     0: [
-        [(2,1),(11,1)],
-        [(11,1),(11,12)],
-        [(11,12),(2,12)],
-        [(2,12),(2,1)],
+        [(2,2),(10,2)],    # top
+        [(10,2),(10,10)],  # right rail
+        [(10,10),(2,10)],  # bottom
+        [(2,10),(2,2)],    # left rail
     ],
     1: [
-        [(7,1),(7,12)],
-        [(5,3),(7,1)],
+        [(5,3),(6,2)],     # small hook/top
+        [(6,2),(6,10)],    # main vertical stroke
     ],
     2: [
-        [(2,3),(11,3)],
-        [(11,3),(11,7)],
-        [(11,7),(2,11)],
-        [(2,11),(11,11)],
+        [(2,2),(10,2)],    # top
+        [(10,2),(10,6)],   # upper right vertical
+        [(10,6),(2,10)],   # diagonal/connector down to bottom-left area
+        [(2,10),(10,10)],  # bottom
     ],
     3: [
-        [(2,3),(11,3)],
-        [(11,3),(11,9)],
-        [(2,9),(11,9)],
-        [(11,9),(11,12)],
-        [(2,12),(11,12)],
+        [(2,2),(10,2)],    # top
+        [(10,2),(10,12)],  # vertical
+        [(10,12),(2,12)],  # bottom
+        [(10,9),(2,9)],    # middle horizontal
     ],
     4: [
-        [(10,1),(4,8)],
-        [(4,8),(11,8)],
-        [(11,1),(11,12)],
+        [(2,6),(10,6)],    # middle horizontal (the sheared bar)
+        [(10,1),(10,12)],  # right rail
+        [(4,1),(4,6)],     # internal left-up stroke (approx)
     ],
     5: [
-        [(11,1),(2,1)],
-        [(2,1),(2,7)],
-        [(2,7),(11,7)],
-        [(11,7),(11,12)],
-        [(11,12),(2,12)],
+        [(2,2),(10,2)],    # top (drawn left→right)
+        [(2,2),(2,6)],     # left upper vertical down
+        [(2,6),(10,6)],    # center horizontal
+        [(10,6),(10,12)],  # right lower vertical
+        [(10,12),(2,12)],  # bottom
     ],
     6: [
-        [(11,2),(3,2)],
-        [(3,2),(3,12)],
-        [(3,12),(11,12)],
-        [(11,12),(11,8)],
-        [(11,8),(3,8)],
+        [(2,2),(10,2)],    # top
+        [(2,2),(2,12)],    # left rail (full)
+        [(2,12),(10,12)],  # bottom
+        [(10,12),(10,8)],  # right lower short rail up
+        [(10,8),(2,8)],    # inner middle connector
     ],
     7: [
-        [(2,1),(11,1)],
-        [(11,1),(6,12)],
+        [(2,2),(10,2)],    # top horizontal
+        [(10,2),(6,12)],   # diagonal down (slanted leg)
     ],
     8: [
-        [(2,3),(11,3)],
-        [(11,3),(11,9)],
-        [(11,9),(2,9)],
-        [(2,9),(2,3)],
-        [(2,9),(11,12)],
+        [(2,2),(10,2)],    # top
+        [(10,2),(10,9)],   # right upper rail
+        [(10,9),(2,9)],    # middle/belt
+        [(2,9),(2,2)],     # left upper rail
+        [(2,9),(10,12)],   # center connector/bulge (approx)
+        [(2,12),(10,12)],  # bottom (optional if you prefer full closure)
     ],
     9: [
-        [(2,12),(11,12)],
-        [(11,12),(11,2)],
-        [(11,2),(3,2)],
-        [(3,2),(3,7)],
-        [(3,7),(11,7)]
+        [(2,2),(10,2)],    # top-ish across (note: your bitmap has a slightly shorter top)
+        [(10,2),(10,9)],   # right rail up/down
+        [(10,9),(2,9)],    # middle/belt
+        [(2,9),(2,6)],     # left short rail (inner)
+        [(2,12),(10,12)],  # bottom baseline (optional for visual closure)
     ],
 }
+
 
 # ---------------------------
 # Drawing helpers that reuse matrix API
