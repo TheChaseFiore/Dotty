@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """
-Dotty main loop (stroke-based transitions, no diff skipping,
-simulated seconds for debugging)
+main.py — Dotty with stroke-based digit transitions (two-point strokes)
 
-- 28x28 → 4 digits (HH on top, MM or SS on bottom)
-- /tmp/dotty_show_seconds → show *simulated* seconds (0..59..0), not wall-clock
-- /tmp/dotty_top_of_hour → force random invert + toggle polarity
-- /tmp/dotty_snake_delay → live minute animation speed
-- /tmp/dotty_sec_snake_delay → live seconds animation speed
-- /tmp/dotty_force_minute → force bottom animation now
-
-Key point in this version:
-➡️ If a pixel is part of the OLD digit’s shape, we animate it (erase it),
-   even if the NEW digit also uses it. Then we draw the NEW digit.
-   This prevents “orphan” pixels that never got animated.
+Features:
+- 14x14 digit strokes authored as two-tuples per stroke (list of points)
+- stroke-based transitions: erase whole old strokes then draw whole new strokes
+- simulated seconds debug mode (/tmp/dotty_show_seconds) — advances sec_sim step-by-step
+- top-of-hour random invert and hour polarity toggle (/tmp/dotty_top_of_hour)
+- live per-pixel speed tuning via files:
+    /tmp/dotty_snake_delay
+    /tmp/dotty_sec_snake_delay
+- test trigger /tmp/dotty_force_minute to run minute animation now
+- strokes included for digits 0..9 (authorable)
 """
 
 import os
@@ -26,9 +24,9 @@ import numpy as np
 import serial_port
 import matrix
 
-# ---------------------------------------------------------------------
-# FILE TRIGGERS
-# ---------------------------------------------------------------------
+# ---------------------------
+# Config / files / constants
+# ---------------------------
 TRIGGER_INVERT_FILE = "/tmp/dotty_top_of_hour"
 SHOW_SECONDS_FILE = "/tmp/dotty_show_seconds"
 FORCE_MINUTE_FILE = "/tmp/dotty_force_minute"
@@ -36,32 +34,31 @@ FORCE_MINUTE_FILE = "/tmp/dotty_force_minute"
 SNAKE_DELAY_FILE = "/tmp/dotty_snake_delay"
 SEC_SNAKE_DELAY_FILE = "/tmp/dotty_sec_snake_delay"
 
-# ---------------------------------------------------------------------
-# CONSTANTS
-# ---------------------------------------------------------------------
 WIDTH = 28
 HEIGHT = 28
 DIGIT_SIZE = 14
 
-SNAKE_DELAY_DEFAULT = 0.02      # minute animation speed
-SEC_SNAKE_DELAY_DEFAULT = 0.02  # seconds animation speed
+SNAKE_DELAY_DEFAULT = 0.06
+SEC_SNAKE_DELAY_DEFAULT = 0.02
 
-# anything smaller than this is drawn in one go (no delay) to avoid blips
-MIN_COMPONENT_SIZE = 3
+# if a stroke has <= this many pixels, draw it instantly (avoid orphan flicker)
+INSTANT_THRESHOLD_DEFAULT = 3
 
-# ---------------------------------------------------------------------
-# HARDWARE
-# ---------------------------------------------------------------------
+# stroke rasterization thickness (1 works well on 14x14)
+STROKE_THICKNESS_DEFAULT = 1
+
+# ---------------------------
+# Hardware
+# ---------------------------
 panels = matrix.matrix(4)
 rs232 = serial_port.initiate_serial()
 
-# toggled every top-of-hour
+# display polarity toggled at top-of-hour
 DISPLAY_INVERTED = False
 
-
-# ---------------------------------------------------------------------
-# BASIC HELPERS
-# ---------------------------------------------------------------------
+# ---------------------------
+# Utilities
+# ---------------------------
 def refresh(flaggs=True):
     serial_port.refresh(panels, rs232, flaggs)
 
@@ -102,124 +99,185 @@ def read_delay(path, fallback):
         pass
     return fallback
 
+# ---------------------------
+# Strokes helper (embedded)
+# ---------------------------
+# Bresenham integer line
+def bresenham_line(x0, y0, x1, y1):
+    x0, y0, x1, y1 = int(round(x0)), int(round(y0)), int(round(x1)), int(round(y1))
+    dx = abs(x1 - x0)
+    sx = 1 if x0 < x1 else -1
+    dy = -abs(y1 - y0)
+    sy = 1 if y0 < y1 else -1
+    err = dx + dy
+    x, y = x0, y0
+    out = []
+    while True:
+        out.append((x, y))
+        if x == x1 and y == y1:
+            break
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x += sx
+        if e2 <= dx:
+            err += dx
+            y += sy
+    return out
 
-# ---------------------------------------------------------------------
-# CONNECTED COMPONENTS (14x14)
-# ---------------------------------------------------------------------
-def mask_connected_components(mask):
+def stroke_to_ordered_pixels(stroke, thickness=STROKE_THICKNESS_DEFAULT, bounds=(WIDTH, HEIGHT)):
     """
-    mask: 14x14 (0/1)
-    return: list[list[(x,y)]]
+    Convert stroke (polyline of points) to ordered pixel list.
+    stroke: list of (x,y) points (2-tuples minimum)
+    thickness: integer
+    bounds: (width, height)
     """
-    visited = [[False] * DIGIT_SIZE for _ in range(DIGIT_SIZE)]
-    comps = []
+    w, h = bounds
+    pts = []
+    seen = set()
+    # walk segments
+    for a, b in zip(stroke, stroke[1:]):
+        seg = bresenham_line(a[0], a[1], b[0], b[1])
+        for p in seg:
+            if p not in seen and 0 <= p[0] < w and 0 <= p[1] < h:
+                pts.append(p)
+                seen.add(p)
+    # thickness expansion while roughly preserving order
+    if thickness <= 1:
+        return pts
+    ordered = []
+    added = set()
+    r = thickness // 2
+    for (cx, cy) in pts:
+        for dy in range(-r, r+1):
+            for dx in range(-r, r+1):
+                nx, ny = cx + dx, cy + dy
+                if 0 <= nx < w and 0 <= ny < h:
+                    if (nx, ny) not in added:
+                        ordered.append((nx, ny))
+                        added.add((nx, ny))
+    return ordered
 
-    for y in range(DIGIT_SIZE):
-        for x in range(DIGIT_SIZE):
-            if mask[y][x] == 1 and not visited[y][x]:
-                stack = [(x, y)]
-                visited[y][x] = True
-                comp = [(x, y)]
-                while stack:
-                    cx, cy = stack.pop()
-                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                        nx, ny = cx + dx, cy + dy
-                        if 0 <= nx < DIGIT_SIZE and 0 <= ny < DIGIT_SIZE:
-                            if mask[ny][nx] == 1 and not visited[ny][nx]:
-                                visited[ny][nx] = True
-                                stack.append((nx, ny))
-                                comp.append((nx, ny))
-                comps.append(comp)
-
-    return comps
-
-
-def order_component_pixels(comp):
-    """
-    Stable order for one component.
-    Top-to-bottom, then left-to-right is fine for a 14x14 glyph.
-    """
-    return sorted(comp, key=lambda p: (p[1], p[0]))
-
-
-def play_component(dx, dy, comp, color, delay, tiny=False):
-    """
-    Draw/erase one component.
-    - tiny=True → draw whole component instantly (no orphan flicker)
-    - else → 1 pixel at a time
-    """
-    if tiny:
-        for (lx, ly) in comp:
-            panels.draw(dx + lx, dy + ly, color)
-        refresh()
+def play_stroke(panels_obj, stroke_pixels, color, refresh_fn,
+                per_pixel_delay=0.01, instant_threshold=INSTANT_THRESHOLD_DEFAULT):
+    if not stroke_pixels:
         return
+    if len(stroke_pixels) <= instant_threshold:
+        for (x,y) in stroke_pixels:
+            panels_obj.draw(x, y, color)
+        refresh_fn()
+        return
+    for (x,y) in stroke_pixels:
+        panels_obj.draw(x, y, color)
+        refresh_fn()
+        time.sleep(per_pixel_delay)
 
-    for (lx, ly) in comp:
-        panels.draw(dx + lx, dy + ly, color)
-        refresh()
-        time.sleep(delay)
+def offset_strokes(strokes, dx=0, dy=0):
+    return [[(x+dx, y+dy) for (x,y) in s] for s in strokes]
 
-
-# ---------------------------------------------------------------------
-# STROKE-BASED TRANSITION  👈 important change
-# ---------------------------------------------------------------------
-def stroke_digit_transition(dx, dy, old_mask, new_mask, inverted, delay):
+def transition_by_strokes(panels_obj, old_strokes, new_strokes,
+                          refresh_fn,
+                          thickness=STROKE_THICKNESS_DEFAULT,
+                          per_pixel_delay=0.01,
+                          instant_threshold=INSTANT_THRESHOLD_DEFAULT,
+                          bounds=(WIDTH, HEIGHT),
+                          inverted=False,
+                          erase_first=True):
     """
-    Stroke-based animation:
-
-    1. ERASE PHASE
-       - build components from the *old* digit ONLY
-       - walk each component
-       - for every pixel in that component: ERASE it to background
-         (EVEN IF the new digit also wants that pixel)
-       → this guarantees no shared pixel survives in the middle
-
-    2. DRAW PHASE
-       - build components from the *new* digit ONLY
-       - walk each component
-       - draw to foreground
-
-    Tiny components are drawn in one go to avoid 1px blips.
+    Erase old_strokes (reverse order), then draw new_strokes. Each stroke is a list of points.
     """
     bg = 0 if not inverted else 1
     fg = 1 if not inverted else 0
 
-    # ---- ERASE PHASE (old digit) ----
-    erase_comps = mask_connected_components(old_mask)
-    # big→small so main stroke first
-    erase_comps.sort(key=len, reverse=True)
-    for comp in erase_comps:
-        ordered = order_component_pixels(comp)
-        tiny = len(ordered) < MIN_COMPONENT_SIZE
-        play_component(dx, dy, ordered, bg, delay, tiny=tiny)
+    def _stroke_key(s):
+        return -len(stroke_to_ordered_pixels(s, thickness=thickness, bounds=bounds))
 
-    # ---- DRAW PHASE (new digit) ----
-    draw_comps = mask_connected_components(new_mask)
-    draw_comps.sort(key=len, reverse=True)
-    for comp in draw_comps:
-        ordered = order_component_pixels(comp)
-        tiny = len(ordered) < MIN_COMPONENT_SIZE
-        play_component(dx, dy, ordered, fg, delay, tiny=tiny)
+    if erase_first:
+        ordered_old = list(reversed(old_strokes or []))
+        ordered_old.sort(key=_stroke_key)
+        for stroke in ordered_old:
+            pixels = stroke_to_ordered_pixels(stroke, thickness=thickness, bounds=bounds)
+            play_stroke(panels_obj, pixels, bg, refresh_fn,
+                        per_pixel_delay=per_pixel_delay, instant_threshold=instant_threshold)
 
+    ordered_new = list(new_strokes or [])
+    ordered_new.sort(key=_stroke_key)
+    for stroke in ordered_new:
+        pixels = stroke_to_ordered_pixels(stroke, thickness=thickness, bounds=bounds)
+        play_stroke(panels_obj, pixels, fg, refresh_fn,
+                    per_pixel_delay=per_pixel_delay, instant_threshold=instant_threshold)
 
-# ---------------------------------------------------------------------
-# OTHER ANIMATIONS
-# ---------------------------------------------------------------------
-def random_invert_animation(panels_obj, refresh_fn,
-                            delay=0.01, width=WIDTH, height=HEIGHT):
-    current = capture_screen(panels_obj, width, height)
-    target = 1 - current
-    coords = [(x, y) for y in range(height) for x in range(width)]
-    random.shuffle(coords)
-    for (x, y) in coords:
-        panels_obj.draw(x, y, int(target[y, x]))
-        refresh_fn()
-        time.sleep(delay)
+# ---------------------------
+# Digit stroke definitions (14x14 coordinate grid 0..13)
+# Authorable. Tweak endpoints to taste.
+# Each digit: list of strokes (stroke = list of points)
+# ---------------------------
+digit_strokes = {
+    0: [
+        [(2,1),(11,1)],
+        [(11,1),(11,12)],
+        [(11,12),(2,12)],
+        [(2,12),(2,1)],
+    ],
+    1: [
+        [(7,1),(7,12)],
+        [(5,3),(7,1)],
+    ],
+    2: [
+        [(2,3),(11,3)],
+        [(11,3),(11,7)],
+        [(11,7),(2,11)],
+        [(2,11),(11,11)],
+    ],
+    3: [
+        [(2,3),(11,3)],
+        [(11,3),(11,9)],
+        [(2,9),(11,9)],
+        [(11,9),(11,12)],
+        [(2,12),(11,12)],
+    ],
+    4: [
+        [(10,1),(4,8)],
+        [(4,8),(11,8)],
+        [(11,1),(11,12)],
+    ],
+    5: [
+        [(11,1),(2,1)],
+        [(2,1),(2,7)],
+        [(2,7),(11,7)],
+        [(11,7),(11,12)],
+        [(11,12),(2,12)],
+    ],
+    6: [
+        [(11,2),(3,2)],
+        [(3,2),(3,12)],
+        [(3,12),(11,12)],
+        [(11,12),(11,8)],
+        [(11,8),(3,8)],
+    ],
+    7: [
+        [(2,1),(11,1)],
+        [(11,1),(6,12)],
+    ],
+    8: [
+        [(2,3),(11,3)],
+        [(11,3),(11,9)],
+        [(11,9),(2,9)],
+        [(2,9),(2,3)],
+        [(2,9),(11,12)],
+    ],
+    9: [
+        [(2,12),(11,12)],
+        [(11,12),(11,2)],
+        [(11,2),(3,2)],
+        [(3,2),(3,7)],
+        [(3,7),(11,7)]
+    ],
+}
 
-
-# ---------------------------------------------------------------------
-# DRAWING
-# ---------------------------------------------------------------------
+# ---------------------------
+# Drawing helpers that reuse matrix API
+# ---------------------------
 def draw_hours_only(h, inverted):
     d1 = h // 10
     d2 = h % 10
@@ -231,40 +289,50 @@ def draw_hours_only(h, inverted):
                 panels.draw(x, y, 1 - panels.get(x, y))
     refresh()
 
-
 def draw_hours_and_bottom(h, bottom_val, inverted):
     panels.clear()
-
     # hours
     d1 = h // 10
     d2 = h % 10
     panels.frame(matrix.returnDigit(d1), 0, 0)
     panels.frame(matrix.returnDigit(d2), 14, 0)
-
     # bottom (minutes or seconds)
     b1 = bottom_val // 10
     b2 = bottom_val % 10
     panels.frame(matrix.returnDigit(b1), 0, 14)
     panels.frame(matrix.returnDigit(b2), 14, 14)
-
     if inverted:
         buf = capture_screen(panels)
         draw_buffer(panels, 1 - buf)
     else:
         refresh()
 
+# ---------------------------
+# Random invert animation (unchanged)
+# ---------------------------
+def random_invert_animation(panels_obj, refresh_fn,
+                            delay=0.01, width=WIDTH, height=HEIGHT):
+    current = capture_screen(panels_obj, width, height)
+    target = 1 - current
+    coords = [(x, y) for y in range(height) for x in range(width)]
+    random.shuffle(coords)
+    for (x, y) in coords:
+        panels_obj.draw(x, y, int(target[y, x]))
+        refresh_fn()
+        time.sleep(delay)
 
-# ---------------------------------------------------------------------
-# MAIN LOOP
-# ---------------------------------------------------------------------
+# ---------------------------
+# Main loop
+# ---------------------------
 def main():
     global DISPLAY_INVERTED
 
     last_min = -1
     last_hour = -1
+    last_sec = -1
     prev_show_seconds = False
 
-    # simulated seconds for debug mode
+    # simulated seconds counter
     sec_sim = 0
 
     # initial draw
@@ -272,17 +340,19 @@ def main():
     draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
 
     while True:
-        # real time for hours/min
+        # top row (hours) follows real wall-clock
         h, m, _ = get_time()
         show_seconds = os.path.exists(SHOW_SECONDS_FILE)
 
-        # live tunable speeds
+        # live delays
         minute_delay = read_delay(SNAKE_DELAY_FILE, SNAKE_DELAY_DEFAULT)
         second_delay = read_delay(SEC_SNAKE_DELAY_FILE, SEC_SNAKE_DELAY_DEFAULT)
+        instant_threshold = INSTANT_THRESHOLD_DEFAULT
+        thickness = STROKE_THICKNESS_DEFAULT
 
-        # =========================================================
-        # SECONDS DEBUG MODE (simulated 0..59..0)
-        # =========================================================
+        # ----------------------------
+        # SECONDS DEBUG MODE: simulated seconds stepping
+        # ----------------------------
         if show_seconds:
             if not prev_show_seconds:
                 sec_sim = 0
@@ -300,69 +370,75 @@ def main():
             new_tens = new_s // 10
             new_ones = new_s % 10
 
-            # seconds tens
+            # tens (bottom-left)
             if new_tens != old_tens:
-                stroke_digit_transition(
-                    0, 14,
-                    matrix.returnDigit(old_tens),
-                    matrix.returnDigit(new_tens),
-                    DISPLAY_INVERTED,
-                    delay=second_delay,
-                )
+                old_strokes = offset_strokes(digit_strokes[old_tens], 0, 14)
+                new_strokes = offset_strokes(digit_strokes[new_tens], 0, 14)
+                transition_by_strokes(panels, old_strokes, new_strokes,
+                                      refresh_fn=refresh,
+                                      thickness=thickness,
+                                      per_pixel_delay=second_delay,
+                                      instant_threshold=instant_threshold,
+                                      bounds=(WIDTH, HEIGHT),
+                                      inverted=DISPLAY_INVERTED)
 
-            # seconds ones
+            # ones (bottom-right)
             if new_ones != old_ones:
-                stroke_digit_transition(
-                    14, 14,
-                    matrix.returnDigit(old_ones),
-                    matrix.returnDigit(new_ones),
-                    DISPLAY_INVERTED,
-                    delay=second_delay,
-                )
+                old_strokes = offset_strokes(digit_strokes[old_ones], 14, 14)
+                new_strokes = offset_strokes(digit_strokes[new_ones], 14, 14)
+                transition_by_strokes(panels, old_strokes, new_strokes,
+                                      refresh_fn=refresh,
+                                      thickness=thickness,
+                                      per_pixel_delay=second_delay,
+                                      instant_threshold=instant_threshold,
+                                      bounds=(WIDTH, HEIGHT),
+                                      inverted=DISPLAY_INVERTED)
 
-            # allow invert in seconds mode
+            last_sec = sec_sim
+            # allow invert trigger while in seconds mode
             if os.path.exists(TRIGGER_INVERT_FILE):
-                random_invert_animation(panels, refresh,
-                                        delay=0.01,
-                                        width=WIDTH, height=HEIGHT)
+                random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
                 DISPLAY_INVERTED = not DISPLAY_INVERTED
                 draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
                 os.remove(TRIGGER_INVERT_FILE)
 
-            # short pause so you can watch it
             time.sleep(0.05)
             continue
 
-        # leaving seconds mode → restore minutes
+        # leaving seconds mode: restore minutes display
         if prev_show_seconds:
             draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
             prev_show_seconds = False
 
-        # =========================================================
-        # FORCE-MINUTE TEST
-        # =========================================================
+        # ----------------------------
+        # FORCE-MINUTE test
+        # ----------------------------
         if os.path.exists(FORCE_MINUTE_FILE):
             tens = m // 10
             ones = m % 10
-            stroke_digit_transition(
-                0, 14,
-                matrix.returnDigit(tens),
-                matrix.returnDigit(tens),
-                DISPLAY_INVERTED,
-                delay=minute_delay,
-            )
-            stroke_digit_transition(
-                14, 14,
-                matrix.returnDigit(ones),
-                matrix.returnDigit(ones),
-                DISPLAY_INVERTED,
-                delay=minute_delay,
-            )
+            transition_by_strokes(panels,
+                                  offset_strokes(digit_strokes[tens], 0, 14),
+                                  offset_strokes(digit_strokes[tens], 0, 14),
+                                  refresh_fn=refresh,
+                                  thickness=thickness,
+                                  per_pixel_delay=minute_delay,
+                                  instant_threshold=instant_threshold,
+                                  bounds=(WIDTH, HEIGHT),
+                                  inverted=DISPLAY_INVERTED)
+            transition_by_strokes(panels,
+                                  offset_strokes(digit_strokes[ones], 14, 14),
+                                  offset_strokes(digit_strokes[ones], 14, 14),
+                                  refresh_fn=refresh,
+                                  thickness=thickness,
+                                  per_pixel_delay=minute_delay,
+                                  instant_threshold=instant_threshold,
+                                  bounds=(WIDTH, HEIGHT),
+                                  inverted=DISPLAY_INVERTED)
             os.remove(FORCE_MINUTE_FILE)
 
-        # =========================================================
-        # NORMAL MINUTE MODE
-        # =========================================================
+        # ----------------------------
+        # NORMAL minute mode
+        # ----------------------------
         if m != last_min:
             old_m = last_min if last_min >= 0 else m
             old_tens = old_m // 10
@@ -370,47 +446,47 @@ def main():
             new_tens = m // 10
             new_ones = m % 10
 
-            # top-of-hour
+            # top-of-hour: random invert and flip polarity
             if m == 0:
-                random_invert_animation(panels, refresh,
-                                        delay=0.01,
-                                        width=WIDTH, height=HEIGHT)
+                random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
                 DISPLAY_INVERTED = not DISPLAY_INVERTED
 
-            # minute tens
+            # minute tens (bottom-left)
             if new_tens != old_tens:
-                stroke_digit_transition(
-                    0, 14,
-                    matrix.returnDigit(old_tens),
-                    matrix.returnDigit(new_tens),
-                    DISPLAY_INVERTED,
-                    delay=minute_delay,
-                )
+                old_strokes = offset_strokes(digit_strokes[old_tens], 0, 14)
+                new_strokes = offset_strokes(digit_strokes[new_tens], 0, 14)
+                transition_by_strokes(panels, old_strokes, new_strokes,
+                                      refresh_fn=refresh,
+                                      thickness=thickness,
+                                      per_pixel_delay=minute_delay,
+                                      instant_threshold=instant_threshold,
+                                      bounds=(WIDTH, HEIGHT),
+                                      inverted=DISPLAY_INVERTED)
 
-            # minute ones
+            # minute ones (bottom-right)
             if new_ones != old_ones:
-                stroke_digit_transition(
-                    14, 14,
-                    matrix.returnDigit(old_ones),
-                    matrix.returnDigit(new_ones),
-                    DISPLAY_INVERTED,
-                    delay=minute_delay,
-                )
+                old_strokes = offset_strokes(digit_strokes[old_ones], 14, 14)
+                new_strokes = offset_strokes(digit_strokes[new_ones], 14, 14)
+                transition_by_strokes(panels, old_strokes, new_strokes,
+                                      refresh_fn=refresh,
+                                      thickness=thickness,
+                                      per_pixel_delay=minute_delay,
+                                      instant_threshold=instant_threshold,
+                                      bounds=(WIDTH, HEIGHT),
+                                      inverted=DISPLAY_INVERTED)
 
             last_min = m
 
-            # hour might have changed too
+            # if hour changed, redraw top half immediately
             if h != last_hour:
                 draw_hours_only(h, DISPLAY_INVERTED)
                 last_hour = h
 
-        # =========================================================
-        # SSH INVERT TRIGGER (normal mode)
-        # =========================================================
+        # ----------------------------
+        # SSH invert trigger (normal mode)
+        # ----------------------------
         if os.path.exists(TRIGGER_INVERT_FILE):
-            random_invert_animation(panels, refresh,
-                                    delay=0.01,
-                                    width=WIDTH, height=HEIGHT)
+            random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
             DISPLAY_INVERTED = not DISPLAY_INVERTED
             draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
             os.remove(TRIGGER_INVERT_FILE)
