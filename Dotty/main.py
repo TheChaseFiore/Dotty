@@ -266,18 +266,18 @@ def sequential_transition(panels_obj, from_digit, to_digit, dx, dy,
     # Clear the digit box area first to bg then draw canonical glyph pixels.
     # NOTE: this final "snap" is optional 
     
-       # clear digit box
+   # clear digit box
+   for y in range(14):
+       for x in range(14):
+           panels_obj.draw(dx + x, dy + y, bg)
+   # draw canonical new digit (using matrix.returnDigit)
+   panels_obj.frame(matrix.returnDigit(to_digit), dx, dy)
+   if inverted:
+       # invert that box
        for y in range(14):
            for x in range(14):
-               panels_obj.draw(dx + x, dy + y, bg)
-       # draw canonical new digit (using matrix.returnDigit)
-       panels_obj.frame(matrix.returnDigit(to_digit), dx, dy)
-       if inverted:
-           # invert that box
-           for y in range(14):
-               for x in range(14):
-                   panels_obj.draw(dx + x, dy + y, 1 - panels_obj.get(dx + x, dy + y))
-       refresh_fn()
+               panels_obj.draw(dx + x, dy + y, 1 - panels_obj.get(dx + x, dy + y))
+   refresh_fn()
 
 
 # ---------------------------
