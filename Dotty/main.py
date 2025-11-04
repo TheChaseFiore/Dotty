@@ -207,6 +207,79 @@ def transition_by_strokes(panels_obj, old_strokes, new_strokes,
         play_stroke(panels_obj, pixels, fg, refresh_fn,
                     per_pixel_delay=per_pixel_delay, instant_threshold=instant_threshold)
 
+def sequential_transition(panels_obj, from_digit, to_digit, dx, dy,
+                          refresh_fn,
+                          per_pixel_delay=0.01,
+                          thickness=1,
+                          instant_threshold=3,
+                          bounds=(WIDTH, HEIGHT),
+                          inverted=False):
+    """
+    Sequential stroke transition from `from_digit` -> `to_digit`, placed at offset (dx,dy).
+    Uses your `sequential_strokes` mapping for the target digit to drive stroke order.
+    - panels_obj: your matrix instance
+    - from_digit, to_digit: ints 0..9
+    - dx,dy: pixel offsets to place strokes (e.g., 0,14 or 14,14)
+    - refresh_fn: function to call to push changes to hardware (usually refresh)
+    - per_pixel_delay: delay between each pixel when animating strokes
+    - thickness: stroke rasterization thickness
+    - instant_threshold: strokes with <= this many pixels are drawn instantly
+    - bounds: (width,height) for rasterization clamping
+    - inverted: whether display polarity is inverted (swap bg/fg)
+    """
+    # no-op if nothing to change
+    if from_digit == to_digit:
+        return
+
+    bg = 0 if not inverted else 1
+    fg = 1 if not inverted else 0
+
+    # sequence for the target digit (fallback to digit_strokes if not provided)
+    seq = sequential_strokes.get(to_digit, digit_strokes.get(to_digit, []))
+
+    # Helper to offset a single stroke by dx,dy
+    def _offset(stroke, ox, oy):
+        return [(x + ox, y + oy) for (x, y) in stroke]
+
+    # Optional: erase any pixels that belong to the from_digit but are not covered by
+    # the first few strokes — this is cautious but often unnecessary because the seq
+    # typically includes removal strokes. Uncomment if you see leftover pixels.
+    # old_mask = capture_screen(panels_obj, bounds[0], bounds[1])  # not used by default
+
+    # Run the sequence: erase-then-draw for each stroke in order
+    for stroke in seq:
+        off_stroke = _offset(stroke, dx, dy)
+        pixels = stroke_to_ordered_pixels(off_stroke, thickness=thickness, bounds=bounds)
+
+        # ERASE this stroke area (write background along stroke)
+        play_stroke(panels_obj, pixels, bg, refresh_fn,
+                    per_pixel_delay=per_pixel_delay, instant_threshold=instant_threshold)
+
+        # DRAW this stroke area (write foreground along stroke)
+        play_stroke(panels_obj, pixels, fg, refresh_fn,
+                    per_pixel_delay=per_pixel_delay, instant_threshold=instant_threshold)
+
+    # Final pass: ensure we exactly match the canonical new digit in that box.
+    # (This avoids any tiny rasterization differences.)
+    # draw canonical new digit pixels in case any incidental pixels remain.
+    # Build the new digit frame and blit it into place:
+    # Clear the digit box area first to bg then draw canonical glyph pixels.
+    # NOTE: this final "snap" is optional 
+    
+       # clear digit box
+       for y in range(14):
+           for x in range(14):
+               panels_obj.draw(dx + x, dy + y, bg)
+       # draw canonical new digit (using matrix.returnDigit)
+       panels_obj.frame(matrix.returnDigit(to_digit), dx, dy)
+       if inverted:
+           # invert that box
+           for y in range(14):
+               for x in range(14):
+                   panels_obj.draw(dx + x, dy + y, 1 - panels_obj.get(dx + x, dy + y))
+       refresh_fn()
+
+
 # ---------------------------
 # Digit stroke definitions (14x14 coordinate grid 0..13)
 # Authorable. Tweak endpoints to taste.
@@ -215,64 +288,124 @@ def transition_by_strokes(panels_obj, old_strokes, new_strokes,
 # digit_strokes (derived from your 14x14 bitmaps)
 digit_strokes = {
     0: [
-        [(2,2),(10,2)],    # top
-        [(10,2),(10,10)],  # right rail
-        [(10,10),(2,10)],  # bottom
-        [(2,10),(2,2)],    # left rail
+        [(2,11),(11,11)],  
+        [(11,11),(11,2)], 
+        [(11,2),(2,2)],  
+        [(2,2),(2,11)],   
     ],
     1: [
-        [(5,3),(6,2)],     # small hook/top
-        [(6,2),(6,10)],    # main vertical stroke
+        [(6,11),(7,11)],  
+        [(7,11),(7,2)],  
     ],
     2: [
-        [(2,2),(10,2)],    # top
-        [(10,2),(10,6)],   # upper right vertical
-        [(10,6),(2,10)],   # diagonal/connector down to bottom-left area
-        [(2,10),(10,10)],  # bottom
+        [(2,11),(11,11)],  
+        [(11,11),(11,7)], 
+        [(11,7),(2,7)],  
+        [(2,2),(11,2)],  
     ],
     3: [
-        [(2,2),(10,2)],    # top
-        [(10,2),(10,12)],  # vertical
-        [(10,12),(2,12)],  # bottom
-        [(10,9),(2,9)],    # middle horizontal
+        [(2,11),(11,11)],   
+        [(11,11),(11,2)],  
+        [(11,2),(2,2)], 
+        [(11,7),(4,7)],   
     ],
     4: [
-        [(2,6),(10,6)],    # middle horizontal (the sheared bar)
-        [(10,1),(10,12)],  # right rail
-        [(4,1),(4,6)],     # internal left-up stroke (approx)
+        [(2,11),(2,7)],    
+        [(2,7),(11,7)], 
+        [(11,11),(11,2)],  
     ],
     5: [
-        [(2,2),(10,2)],    # top (drawn left→right)
-        [(2,2),(2,6)],     # left upper vertical down
-        [(2,6),(10,6)],    # center horizontal
-        [(10,6),(10,12)],  # right lower vertical
-        [(10,12),(2,12)],  # bottom
+        [(11,11),(2,11)],  
+        [(2,11),(2,7)],   
+        [(2,7),(11,7)],    
+        [(11,7),(11,2)], 
+        [(11,2),(2,2)],  
     ],
     6: [
-        [(2,2),(10,2)],    # top
-        [(2,2),(2,12)],    # left rail (full)
-        [(2,12),(10,12)],  # bottom
-        [(10,12),(10,8)],  # right lower short rail up
-        [(10,8),(2,8)],    # inner middle connector
+        [(11,11),(2,11)],    
+        [(2,11),(2,2)],   
+        [(2,2),(11,2)],  
+        [(11,2),(11,7)], 
+        [(11,7),(2,7)],  
     ],
     7: [
-        [(2,2),(10,2)],    # top horizontal
-        [(10,2),(6,12)],   # diagonal down (slanted leg)
+        [(2,11),(11,11)],   
+        [(11,2),(11,2)],  
     ],
     8: [
-        [(2,2),(10,2)],    # top
-        [(10,2),(10,9)],   # right upper rail
-        [(10,9),(2,9)],    # middle/belt
-        [(2,9),(2,2)],     # left upper rail
-        [(2,9),(10,12)],   # center connector/bulge (approx)
-        [(2,12),(10,12)],  # bottom (optional if you prefer full closure)
+        [(2,11),(11,11)],   
+        [(11,11),(11,2)],  
+        [(11,2),(2,2)],  
+        [(2,2),(2,11)],   
+        [(2,7),(11,7)],  
     ],
     9: [
-        [(2,2),(10,2)],    # top-ish across (note: your bitmap has a slightly shorter top)
-        [(10,2),(10,9)],   # right rail up/down
-        [(10,9),(2,9)],    # middle/belt
-        [(2,9),(2,6)],     # left short rail (inner)
-        [(2,12),(10,12)],  # bottom baseline (optional for visual closure)
+        [(2,11),(11,11)],    
+        [(11,11),(11,2)],  
+        [(2,11),(2,7)],  
+        [(2,7),(11,7)],     
+    ],
+}
+
+# ---------------------------
+# sequential_strokes defines what strokes are needed to
+# transisition between numbers smoothely as long as it is
+# done sequentially
+# ---------------------------
+sequential_strokes = {
+    1: [
+        [(2,11),(5,11)],  
+        [(8,11),(11,11)],  
+        [(11,11),(11,2)],   
+        [(11,2),(2,2)],  
+        [(2,2),(2,11)],  
+    ],
+    2: [
+        [(6,11),(7,11)],   
+        [(7,11),(7,2)],   
+        [(2,11),(11,11)], 
+        [(11,11),(11,7)],  
+        [(11,7),(2,7)],    
+        [(2,2),(11,2)],
+    ],
+    3: [
+        [(2,2),(2,7)],  
+        [(2,7),(4,7)],  
+        [(11,7),(11,11)],   
+    ],
+    4: [
+        [(11,11),(2,11)],    
+        [(2,11),(2,7)],  
+        [(2,7),(4,7)],  
+        [(11,2),(2,2)],    
+    ],
+    5: [
+        [(2,2),(11,2)],    
+        [(11,7),(11,11)],  
+        [(11,11),(2,11)],   
+    ],
+    6: [
+        [(2,7),(2,2)],    
+    ],
+    7: [
+        [(2,11),(2,2)],   
+        [(2,2),(11,2)],   
+        [(11,7),(11,11)],  
+        [(11,7),(2,7)], 
+    ],
+    8: [
+        [(2,11),(2,2)],    
+        [(2,2),(11,2)], 
+        [(2,7),(11,7)],
+    ],
+    9: [
+        [(2,7),(2,2)],    
+        [(2,2),(11,2)],  
+    ],
+    0: [
+        [(11,7),(2,7)],   
+        [(2,7),(2,2)], 
+        [(2,2),(11,2)],   
     ],
 }
 
@@ -453,29 +586,24 @@ def main():
                 random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
                 DISPLAY_INVERTED = not DISPLAY_INVERTED
 
-            # minute tens (bottom-left)
-            if new_tens != old_tens:
-                old_strokes = offset_strokes(digit_strokes[old_tens], 0, 14)
-                new_strokes = offset_strokes(digit_strokes[new_tens], 0, 14)
-                transition_by_strokes(panels, old_strokes, new_strokes,
-                                      refresh_fn=refresh,
-                                      thickness=thickness,
-                                      per_pixel_delay=minute_delay,
-                                      instant_threshold=instant_threshold,
-                                      bounds=(WIDTH, HEIGHT),
-                                      inverted=DISPLAY_INVERTED)
+            # bottom-left (tens) example:
+            sequential_transition(panels, old_tens, new_tens, dx=0, dy=14,
+                                  refresh_fn=refresh,
+                                  per_pixel_delay=minute_delay,
+                                  thickness=thickness,
+                                  instant_threshold=instant_threshold,
+                                  bounds=(WIDTH, HEIGHT),
+                                  inverted=DISPLAY_INVERTED)
 
-            # minute ones (bottom-right)
-            if new_ones != old_ones:
-                old_strokes = offset_strokes(digit_strokes[old_ones], 14, 14)
-                new_strokes = offset_strokes(digit_strokes[new_ones], 14, 14)
-                transition_by_strokes(panels, old_strokes, new_strokes,
-                                      refresh_fn=refresh,
-                                      thickness=thickness,
-                                      per_pixel_delay=minute_delay,
-                                      instant_threshold=instant_threshold,
-                                      bounds=(WIDTH, HEIGHT),
-                                      inverted=DISPLAY_INVERTED)
+            # bottom-right (ones) example:
+            sequential_transition(panels, old_ones, new_ones, dx=14, dy=14,
+                                  refresh_fn=refresh,
+                                  per_pixel_delay=minute_delay,
+                                  thickness=thickness,
+                                  instant_threshold=instant_threshold,
+                                  bounds=(WIDTH, HEIGHT),
+                                  inverted=DISPLAY_INVERTED)
+
 
             last_min = m
 
