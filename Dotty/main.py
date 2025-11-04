@@ -265,19 +265,93 @@ def sequential_transition(panels_obj, from_digit, to_digit, dx, dy,
     # Build the new digit frame and blit it into place:
     # Clear the digit box area first to bg then draw canonical glyph pixels.
     # NOTE: this final "snap" is optional 
-    f
+    
     # clear digit box
     for y in range(14):
         for x in range(14):
             panels_obj.draw(dx + x, dy + y, bg)
-    # draw canonical new digit (using matrix.returnDigit)
+    '''# draw canonical new digit (using matrix.returnDigit)
     panels_obj.frame(matrix.returnDigit(to_digit), dx, dy)
     if inverted:
         # invert that box
         for y in range(14):
             for x in range(14):
                 panels_obj.draw(dx + x, dy + y, 1 - panels_obj.get(dx + x, dy + y))
-    refresh_fn()
+    refresh_fn()'''
+
+# ---------------------------
+# Coordinate flip helpers
+# ---------------------------
+def flip_stroke_y(stroke, size=DIGIT_SIZE):
+    """
+    Flip stroke's Y coordinates so authored bottom-left (y up) becomes
+    top-left origin (y down) used by display code.
+    size: dimension of digit (14)
+    """
+    # new_y = (size - 1) - old_y
+    return [(x, (size - 1) - y) for (x, y) in stroke]
+
+def flip_all_strokes(strokes_map, size=DIGIT_SIZE):
+    """Return a new dict with every stroke flipped in Y."""
+    flipped = {}
+    for d, s_list in strokes_map.items():
+        flipped[d] = [flip_stroke_y(s, size) for s in s_list]
+    return flipped
+
+# create a flipped copy you can use everywhere
+digit_strokes_flipped = flip_all_strokes(digit_strokes, DIGIT_SIZE)
+
+# ---------------------------
+# Instant painter using strokes (replaces matrix.returnDigit usage)
+# ---------------------------
+def paint_digit_instant(panels_obj, strokes, dx=0, dy=0, inverted=False,
+                        thickness=STROKE_THICKNESS_DEFAULT):
+    """
+    Paint the canonical digit defined by `strokes` into panels at offset (dx,dy).
+    This writes all stroke pixels instantly (no per-pixel animation) for canonical display.
+    honors `inverted` by flipping color after drawing.
+    """
+    # 1) clear the digit box to background (so leftover pixels vanish)
+    bg = 0 if not inverted else 1
+    fg = 1 if not inverted else 0
+
+    for yy in range(DIGIT_SIZE):
+        for xx in range(DIGIT_SIZE):
+            panels_obj.draw(dx + xx, dy + yy, bg)
+
+    # 2) draw strokes (rasterize with thickness) — draw foreground color directly
+    for stroke in strokes:
+        pxs = stroke_to_ordered_pixels(stroke, thickness=thickness, bounds=(WIDTH, HEIGHT))
+        # stroke pixels are already offset with dx/dy? ensure we offset here
+        for (x, y) in pxs:
+            panels_obj.draw(x, y, fg)
+
+    # 3) if inverted true, we already used fg/bg swapped above; nothing else to do
+    refresh()
+
+# ---------------------------
+# Replace matrix-based draw functions with stroke-based canonical draws
+# ---------------------------
+def draw_hours_only(h, inverted):
+    d1 = h // 10
+    d2 = h % 10
+    # top-left (hours tens)
+    paint_digit_instant(panels, [s for s in digit_strokes_flipped[d1]], dx=0, dy=0, inverted=inverted)
+    # top-right (hours ones)
+    paint_digit_instant(panels, [s for s in digit_strokes_flipped[d2]], dx=14, dy=0, inverted=inverted)
+
+def draw_hours_and_bottom(h, bottom_val, inverted):
+    # paint hours (top row)
+    d1 = h // 10
+    d2 = h % 10
+    paint_digit_instant(panels, [s for s in digit_strokes_flipped[d1]], dx=0, dy=0, inverted=inverted)
+    paint_digit_instant(panels, [s for s in digit_strokes_flipped[d2]], dx=14, dy=0, inverted=inverted)
+
+    # paint bottom (minutes or seconds)
+    b1 = bottom_val // 10
+    b2 = bottom_val % 10
+    paint_digit_instant(panels, [s for s in digit_strokes_flipped[b1]], dx=0, dy=14, inverted=inverted)
+    paint_digit_instant(panels, [s for s in digit_strokes_flipped[b2]], dx=14, dy=14, inverted=inverted)
 
 
 # ---------------------------
@@ -507,8 +581,8 @@ def main():
 
             # tens (bottom-left)
             if new_tens != old_tens:
-                old_strokes = offset_strokes(digit_strokes[old_tens], 0, 14)
-                new_strokes = offset_strokes(digit_strokes[new_tens], 0, 14)
+                old_strokes = offset_strokes(digit_strokes_flipped[old_tens], 0, 14)
+                new_strokes = offset_strokes(digit_strokes_flipped[new_tens], 0, 14)
                 transition_by_strokes(panels, old_strokes, new_strokes,
                                       refresh_fn=refresh,
                                       thickness=thickness,
@@ -519,8 +593,8 @@ def main():
 
             # ones (bottom-right)
             if new_ones != old_ones:
-                old_strokes = offset_strokes(digit_strokes[old_ones], 14, 14)
-                new_strokes = offset_strokes(digit_strokes[new_ones], 14, 14)
+                old_strokes = offset_strokes(digit_strokes_flipped[old_ones], 14, 14)
+                new_strokes = offset_strokes(digit_strokes_flipped[new_ones], 14, 14)
                 transition_by_strokes(panels, old_strokes, new_strokes,
                                       refresh_fn=refresh,
                                       thickness=thickness,
@@ -530,6 +604,7 @@ def main():
                                       inverted=DISPLAY_INVERTED)
 
             last_sec = sec_sim
+            
             # allow invert trigger while in seconds mode
             if os.path.exists(TRIGGER_INVERT_FILE):
                 random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
@@ -552,8 +627,8 @@ def main():
             tens = m // 10
             ones = m % 10
             transition_by_strokes(panels,
-                                  offset_strokes(digit_strokes[tens], 0, 14),
-                                  offset_strokes(digit_strokes[tens], 0, 14),
+                                  offset_strokes(digit_strokes_flipped[tens], 0, 14),
+                                  offset_strokes(digit_strokes_flipped[tens], 0, 14),
                                   refresh_fn=refresh,
                                   thickness=thickness,
                                   per_pixel_delay=minute_delay,
@@ -561,8 +636,8 @@ def main():
                                   bounds=(WIDTH, HEIGHT),
                                   inverted=DISPLAY_INVERTED)
             transition_by_strokes(panels,
-                                  offset_strokes(digit_strokes[ones], 14, 14),
-                                  offset_strokes(digit_strokes[ones], 14, 14),
+                                  offset_strokes(digit_strokes_flipped[ones], 14, 14),
+                                  offset_strokes(digit_strokes_flipped[ones], 14, 14),
                                   refresh_fn=refresh,
                                   thickness=thickness,
                                   per_pixel_delay=minute_delay,
