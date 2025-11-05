@@ -353,7 +353,7 @@ def sequential_transition(pan, from_digit:int, to_digit:int, dx:int, dy:int,
         play_pixels_invert(pan, pixels, refresh_fn=refresh_fn, per_pixel_delay=per_pixel_delay)
 
     # final snap to canonical digit for pixel-perfect result (no-op if already exact)
-    #!!!!!!!!!!!!paint_digit_instant(pan, digit_strokes_flipped[to_digit], dx=dx, dy=dy, inverted=inverted, thickness=thickness)
+    paint_digit_instant(pan, digit_strokes_flipped[to_digit], dx=dx, dy=dy, inverted=inverted, thickness=thickness)
 
 # ---------------------------
 # Display helpers
