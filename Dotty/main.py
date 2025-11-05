@@ -284,7 +284,7 @@ def offset_stroke(stroke: Iterable[Tuple[int,int]], dx:int=0, dy:int=0):
 def paint_digit_instant(pan, strokes: List[List[Tuple[int,int]]], dx=0, dy=0, inverted=False,
                         thickness=STROKE_THICKNESS_DEFAULT):
     """Clear digit box and draw canonical strokes instantly."""
-    bg = 1 if not inverted else 0
+    bg = 1 if not inverted else 0   # keep your panel polarity mapping here
     fg = 0 if not inverted else 1
 
     # clear the digit box area
@@ -292,11 +292,12 @@ def paint_digit_instant(pan, strokes: List[List[Tuple[int,int]]], dx=0, dy=0, in
         for xx in range(DIGIT_SIZE):
             pan.draw(dx + xx, dy + yy, bg)
 
-    # draw each stroke (rasterize in digit-local coords then offset)
+    # draw each stroke (rasterize in display coords)
     for s in strokes:
-        pxs = stroke_to_ordered_pixels([offset_stroke(s, 0, 0)], thickness=thickness, bounds=(DIGIT_SIZE, DIGIT_SIZE))
-        for sx, sy in pxs:
-            tx, ty = sx + dx, sy + dy
+        # offset the stroke into display coords, then rasterize with display bounds
+        off = offset_stroke(s, dx, dy)
+        pxs = stroke_to_ordered_pixels(off, thickness=thickness, bounds=(WIDTH, HEIGHT))
+        for tx, ty in pxs:
             if 0 <= tx < WIDTH and 0 <= ty < HEIGHT:
                 pan.draw(tx, ty, fg)
 
