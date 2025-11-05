@@ -337,8 +337,8 @@ def sequential_transition(pan, from_digit:int, to_digit:int, dx:int, dy:int,
       the sequence will be replayed.
     """
     # skip if same digit and not requested to animate
-    #if from_digit == to_digit and not animate_if_same:
-    #    return
+    if from_digit == to_digit and not animate_if_same:
+        return
 
     bg = 0 if not inverted else 1
     fg = 1 if not inverted else 0
@@ -351,8 +351,9 @@ def sequential_transition(pan, from_digit:int, to_digit:int, dx:int, dy:int,
         off = offset_stroke(stroke, dx, dy)
         pixels = stroke_to_ordered_pixels(off, thickness=thickness, bounds=bounds)
         play_pixels_invert(pan, pixels, refresh_fn=refresh_fn, per_pixel_delay=per_pixel_delay)
-
+    
     # final snap to canonical digit for pixel-perfect result (no-op if already exact)
+    time.sleep(2)
     paint_digit_instant(pan, digit_strokes_flipped[to_digit], dx=dx, dy=dy, inverted=inverted, thickness=thickness)
 
 # ---------------------------
