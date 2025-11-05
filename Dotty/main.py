@@ -327,8 +327,8 @@ def sequential_transition(pan, from_digit:int, to_digit:int, dx:int, dy:int,
       the sequence will be replayed.
     """
     # skip if same digit and not requested to animate
-    if from_digit == to_digit and not animate_if_same:
-        return
+    #if from_digit == to_digit and not animate_if_same:
+    #    return
 
     bg = 0 if not inverted else 1
     fg = 1 if not inverted else 0
