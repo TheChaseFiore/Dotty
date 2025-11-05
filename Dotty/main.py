@@ -66,6 +66,7 @@ digit_strokes = {
         [(2,11),(11,11)],
         [(11,11),(11,7)],
         [(11,7),(2,7)],
+        [(2,7),(2,2)],
         [(2,2),(11,2)],
     ],
     3: [
@@ -315,31 +316,43 @@ def transition_by_strokes(panels_obj, old_strokes, new_strokes,
                           instant_threshold=INSTANT_THRESHOLD_DEFAULT,
                           bounds=(WIDTH, HEIGHT),
                           inverted=False,
-                          erase_first=True):
+                          erase_first=False):
     """
-    Erase old_strokes (reverse order), then draw new_strokes. Each stroke is a list of points.
+    Draw-only transition: ignore old_strokes and animate new_strokes only.
+    Expects strokes already offset into global/display coordinates (use offset_strokes()).
     """
-    bg = 0 if not inverted else 1
+    # compute foreground color with polarity
     fg = 1 if not inverted else 0
 
+    if not new_strokes:
+        return
+
+    # sort by stroke length (optional: longest first)
     def _stroke_key(s):
         return -len(stroke_to_ordered_pixels(s, thickness=thickness, bounds=bounds))
 
-    if erase_first and old_strokes:
-        ordered_old = list(reversed(old_strokes))
-        ordered_old.sort(key=_stroke_key)
-        for stroke in ordered_old:
-            pixels = stroke_to_ordered_pixels(stroke, thickness=thickness, bounds=bounds)
-            play_stroke(panels_obj, pixels, bg, refresh_fn,
-                        per_pixel_delay=per_pixel_delay, instant_threshold=instant_threshold)
+    ordered_new = list(new_strokes)
+    ordered_new.sort(key=_stroke_key)
 
-    if new_strokes:
-        ordered_new = list(new_strokes)
-        ordered_new.sort(key=_stroke_key)
-        for stroke in ordered_new:
-            pixels = stroke_to_ordered_pixels(stroke, thickness=thickness, bounds=bounds)
-            play_stroke(panels_obj, pixels, fg, refresh_fn,
-                        per_pixel_delay=per_pixel_delay, instant_threshold=instant_threshold)
+    for stroke in ordered_new:
+        # rasterize -- here we assume stroke coords are already global (display) coords
+        pixels = stroke_to_ordered_pixels(stroke, thickness=thickness, bounds=bounds)
+
+        # quick draw if very short
+        if len(pixels) <= instant_threshold:
+            for (x, y) in pixels:
+                panels_obj.draw(x, y, fg)
+            if refresh_fn:
+                refresh_fn()
+            continue
+
+        # animate long strokes
+        for (x, y) in pixels:
+            panels_obj.draw(x, y, fg)
+            if refresh_fn:
+                refresh_fn()
+            time.sleep(per_pixel_delay)
+
 
 # ---------------------------
 # Paint canonical digit instantly using strokes (replaces matrix.returnDigit)
