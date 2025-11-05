@@ -372,11 +372,6 @@ def random_invert_animation(pan, refresh_fn, delay=0.01, width=WIDTH, height=HEI
             refresh_fn()
         time.sleep(delay)
 
-
-pixels = stroke_to_ordered_pixels(off, thickness=thickness, bounds=(WIDTH, HEIGHT))
-if not pixels:
-    print(f"No pixels for digit {to_digit} stroke {stroke}")
-
 # ---------------------------
 # Main loop
 # ---------------------------
