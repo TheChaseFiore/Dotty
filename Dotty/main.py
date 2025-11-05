@@ -309,49 +309,6 @@ def play_stroke(panels_obj, stroke_pixels, color, refresh_fn=None,
 def offset_strokes(strokes, dx=0, dy=0):
     return [[(x + dx, y + dy) for (x, y) in s] for s in strokes]
 
-def transition_by_strokes(panels_obj, old_strokes, new_strokes,
-                          refresh_fn,
-                          thickness=STROKE_THICKNESS_DEFAULT,
-                          per_pixel_delay=0.01,
-                          instant_threshold=INSTANT_THRESHOLD_DEFAULT,
-                          bounds=(WIDTH, HEIGHT),
-                          inverted=False,
-                          erase_first=False):
-    """
-    Draw-only transition: ignore old_strokes and animate new_strokes only.
-    Expects strokes already offset into global/display coordinates (use offset_strokes()).
-    """
-    # compute foreground color with polarity
-    fg = 1 if not inverted else 0
-
-    if not new_strokes:
-        return
-
-    # sort by stroke length (optional: longest first)
-    def _stroke_key(s):
-        return -len(stroke_to_ordered_pixels(s, thickness=thickness, bounds=bounds))
-
-    ordered_new = list(new_strokes)
-    ordered_new.sort(key=_stroke_key)
-
-    for stroke in ordered_new:
-        # rasterize -- here we assume stroke coords are already global (display) coords
-        pixels = stroke_to_ordered_pixels(stroke, thickness=thickness, bounds=bounds)
-
-        # quick draw if very short
-        if len(pixels) <= instant_threshold:
-            for (x, y) in pixels:
-                panels_obj.draw(x, y, fg)
-            if refresh_fn:
-                refresh_fn()
-            continue
-
-        # animate long strokes
-        for (x, y) in pixels:
-            panels_obj.draw(x, y, fg)
-            if refresh_fn:
-                refresh_fn()
-            time.sleep(per_pixel_delay)
 
 
 # ---------------------------
@@ -413,11 +370,7 @@ def sequential_transition(panels_obj, from_digit, to_digit, dx, dy,
         off_stroke = _offset(stroke, dx, dy)
         pixels = stroke_to_ordered_pixels(off_stroke, thickness=thickness, bounds=bounds)
 
-        # ERASE (background)
-        play_stroke(panels_obj, pixels, bg, refresh_fn,
-                    per_pixel_delay=per_pixel_delay, instant_threshold=instant_threshold)
-
-        # DRAW (foreground)
+        # DRAW
         play_stroke(panels_obj, pixels, fg, refresh_fn,
                     per_pixel_delay=per_pixel_delay, instant_threshold=instant_threshold)
 
