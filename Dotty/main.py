@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""
-main.py — simplified Dotty with correct stroke-based digit transitions
-
-Key changes:
-- Erase old digit strokes (in reverse order) then draw new strokes.
-- Allow "exercise" transitions even when from==to (used by FORCE_MINUTE).
-- Reduced duplication and clearer helpers.
-- Keeps features: seconds-sim mode, top-of-hour invert, live delay files.
-"""
 
 import os
 import time
@@ -293,8 +284,8 @@ def offset_stroke(stroke: Iterable[Tuple[int,int]], dx:int=0, dy:int=0):
 def paint_digit_instant(pan, strokes: List[List[Tuple[int,int]]], dx=0, dy=0, inverted=False,
                         thickness=STROKE_THICKNESS_DEFAULT):
     """Clear digit box and draw canonical strokes instantly."""
-    bg = 0 if not inverted else 1
-    fg = 1 if not inverted else 0
+    bg = 1 if not inverted else 0
+    fg = 0 if not inverted else 1
 
     # clear the digit box area
     for yy in range(DIGIT_SIZE):
@@ -312,7 +303,7 @@ def paint_digit_instant(pan, strokes: List[List[Tuple[int,int]]], dx=0, dy=0, in
     refresh()
 
 # ---------------------------
-# Proper sequential transition: erase old (reverse order) then draw new strokes
+# Proper sequential transition:
 # ---------------------------
 def sequential_transition(pan, from_digit:int, to_digit:int, dx:int, dy:int,
                           refresh_fn=refresh,
