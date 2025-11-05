@@ -167,6 +167,10 @@ def flip_all(strokes_map):
 digit_strokes_flipped = flip_all(digit_strokes)
 sequential_strokes_flipped = flip_all(sequential_strokes)
 
+for d in range(10):
+    if d not in sequential_strokes_flipped:
+        print(f"Warning: no sequential strokes for {d}")
+
 panels = matrix.matrix(4)
 rs232 = serial_port.initiate_serial()
 DISPLAY_INVERTED = False
@@ -339,7 +343,7 @@ def sequential_transition(pan, from_digit:int, to_digit:int, dx:int, dy:int,
         play_pixels(pan, pixels, fg, refresh_fn, per_pixel_delay, instant_threshold)
 
     # final snap to canonical digit for pixel-perfect result (no-op if already exact)
-    paint_digit_instant(pan, digit_strokes_flipped[to_digit], dx=dx, dy=dy, inverted=inverted, thickness=thickness)
+    #paint_digit_instant(pan, digit_strokes_flipped[to_digit], dx=dx, dy=dy, inverted=inverted, thickness=thickness)
 
 # ---------------------------
 # Display helpers
@@ -368,6 +372,11 @@ def random_invert_animation(pan, refresh_fn, delay=0.01, width=WIDTH, height=HEI
             refresh_fn()
         time.sleep(delay)
 
+
+pixels = stroke_to_ordered_pixels(off, thickness=thickness, bounds=(WIDTH, HEIGHT))
+if not pixels:
+    print(f"No pixels for digit {to_digit} stroke {stroke}")
+
 # ---------------------------
 # Main loop
 # ---------------------------
@@ -392,7 +401,7 @@ def main():
         instant_threshold = INSTANT_THRESHOLD_DEFAULT
         thickness = STROKE_THICKNESS_DEFAULT
 
-            # ----------------------------
+        # ----------------------------
         # SECONDS DEBUG MODE (simulated step-through)
         # ----------------------------
         if show_seconds:
