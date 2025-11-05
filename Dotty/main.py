@@ -281,6 +281,15 @@ def play_pixels(pan, pixels, color, refresh_fn=None, per_pixel_delay=0.01, insta
             refresh_fn()
         time.sleep(per_pixel_delay)
 
+def play_pixels_invert(pan, pixels: Iterable[Tuple[int,int]], refresh_fn=None, per_pixel_delay:float=0.01):
+    """Draw pixels by inverting current state."""
+    for x, y in pixels:
+        current = pan.get(x, y)
+        pan.draw(x, y, 1 - current)  # invert
+        if refresh_fn:
+            refresh_fn()
+        time.sleep(per_pixel_delay)
+
 def offset_stroke(stroke: Iterable[Tuple[int,int]], dx:int=0, dy:int=0):
     return [(x + dx, y + dy) for (x, y) in stroke]
 
@@ -341,10 +350,10 @@ def sequential_transition(pan, from_digit:int, to_digit:int, dx:int, dy:int,
     for stroke in seq:
         off = offset_stroke(stroke, dx, dy)
         pixels = stroke_to_ordered_pixels(off, thickness=thickness, bounds=bounds)
-        play_pixels(pan, pixels, fg, refresh_fn, per_pixel_delay, instant_threshold)
+        play_pixels_invert(pan, pixels, refresh_fn=refresh_fn, per_pixel_delay=per_pixel_delay)
 
     # final snap to canonical digit for pixel-perfect result (no-op if already exact)
-    #paint_digit_instant(pan, digit_strokes_flipped[to_digit], dx=dx, dy=dy, inverted=inverted, thickness=thickness)
+    #!!!!!!!!!!!!paint_digit_instant(pan, digit_strokes_flipped[to_digit], dx=dx, dy=dy, inverted=inverted, thickness=thickness)
 
 # ---------------------------
 # Display helpers
