@@ -401,7 +401,7 @@ def main():
             draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
             prev_show_seconds = True
             time.sleep(0.05)
-            continue
+        continue
 
         # step simulated seconds by +1 (wrap at 60)
         old_s = sec_sim
