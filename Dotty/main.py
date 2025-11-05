@@ -27,7 +27,7 @@ DIGIT_SIZE = 14
 SNAKE_DELAY_DEFAULT = 0.06
 SEC_SNAKE_DELAY_DEFAULT = 0.02
 
-INSTANT_THRESHOLD_DEFAULT = 1
+INSTANT_THRESHOLD_DEFAULT = 0
 STROKE_THICKNESS_DEFAULT = 1
 
 # ---------------------------
@@ -261,9 +261,10 @@ def stroke_to_ordered_pixels(stroke: List[Tuple[int,int]],
                     added.add((nx, ny))
     return ordered
 
-def play_pixels(pan, pixels: Iterable[Tuple[int,int]], color:int,
-                refresh_fn=None, per_pixel_delay:float=0.01,
-                instant_threshold:int=INSTANT_THRESHOLD_DEFAULT):
+def play_pixels(pan, pixels, color, refresh_fn=None, per_pixel_delay=0.01, instant_threshold=1):
+    pixels = list(pixels)
+    print(f"Playing {len(pixels)} pixels, color={color}")
+    
     """Draw list of pixels to `pan`. If short, draw instantly."""
     pixels = list(pixels)
     if not pixels:
@@ -400,59 +401,13 @@ def main():
         # SECONDS DEBUG MODE (simulated step-through)
         # ----------------------------
         if show_seconds:
-            # entering simulated-seconds mode: reset counter and draw initial state
-            if not prev_show_seconds:
-                sec_sim = 0
-                draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
-                prev_show_seconds = True
-                time.sleep(0.05)
-                continue
-
-            # step simulated seconds by +1 (wrap at 60)
-            old_s = sec_sim
-            sec_sim = (sec_sim + 1) % 60
-            new_s = sec_sim
-
-            old_tens, old_ones = divmod(old_s, 10)
-            new_tens, new_ones = divmod(new_s, 10)
-
-            # bottom-left (tens) — only animates if changed
-            if new_tens != old_tens:
-                sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
-                                      refresh_fn=refresh,
-                                      per_pixel_delay=second_delay,
-                                      thickness=thickness,
-                                      instant_threshold=instant_threshold,
-                                      bounds=(WIDTH, HEIGHT),
-                                      inverted=DISPLAY_INVERTED,
-                                      animate_if_same=False)
-
-            # bottom-right (ones) — only animates if changed
-            if new_ones != old_ones:
-                sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
-                                      refresh_fn=refresh,
-                                      per_pixel_delay=second_delay,
-                                      thickness=thickness,
-                                      instant_threshold=instant_threshold,
-                                      bounds=(WIDTH, HEIGHT),
-                                      inverted=DISPLAY_INVERTED,
-                                      animate_if_same=False)
-
-            # record last second shown
-            last_sec = sec_sim
-
-            # allow invert trigger while in seconds mode (same behavior as before)
-            if os.path.exists(TRIGGER_INVERT_FILE):
-                random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
-                DISPLAY_INVERTED = not DISPLAY_INVERTED
-                draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
-                os.remove(TRIGGER_INVERT_FILE)
-
-            # ensure the transition finished before stepping to next second:
-            # sequential_transition/play_pixels are synchronous (they sleep per pixel),
-            # so by the time we reach here the animation is done. Now wait 1s.
-            time.sleep(1.0)
-            continue
+            for d in range(10):
+                sequential_transition(panels, 0, d, dx=0, dy=DIGIT_SIZE,
+                                      refresh_fn=refresh, per_pixel_delay=0.1,
+                                      thickness=1, instant_threshold=0,
+                                      bounds=(WIDTH, HEIGHT), inverted=False,
+                                      animate_if_same=True)
+                time.sleep(3)
 
 
         # ----------------------------
