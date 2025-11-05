@@ -391,70 +391,64 @@ def main():
         instant_threshold = INSTANT_THRESHOLD_DEFAULT
         thickness = STROKE_THICKNESS_DEFAULT
 
-        # ----------------------------
-        # SECONDS DEBUG MODE (simulated step-through)
-        # ----------------------------
-        if show_seconds:
-            if not prev_show_seconds:
-                sec_sim = 0
-                draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
-                prev_show_seconds = True
-                time.sleep(0.05)
-                continue
-
-            old_s = sec_sim
-            sec_sim = (sec_sim + 1) % 60
-            new_s = sec_sim
-
-            old_tens, old_ones = divmod(old_s, 10)
-            new_tens, new_ones = divmod(new_s, 10)
-
-            # tens (bottom-left)
-            sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
-                                  refresh_fn=refresh, per_pixel_delay=second_delay,
-                                  thickness=thickness, instant_threshold=instant_threshold,
-                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-
-            # ones (bottom-right)
-            sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
-                                  refresh_fn=refresh, per_pixel_delay=second_delay,
-                                  thickness=thickness, instant_threshold=instant_threshold,
-                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-
-            # allow invert trigger while in seconds mode
-            if os.path.exists(TRIGGER_INVERT_FILE):
-                random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
-                DISPLAY_INVERTED = not DISPLAY_INVERTED
-                draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
-                os.remove(TRIGGER_INVERT_FILE)
-
+    # ----------------------------
+    # SECONDS DEBUG MODE (simulated step-through)
+    # ----------------------------
+    if show_seconds:
+        # entering simulated-seconds mode: reset counter and draw initial state
+        if not prev_show_seconds:
+            sec_sim = 0
+            draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
+            prev_show_seconds = True
             time.sleep(0.05)
             continue
 
-        # leaving seconds mode: restore minutes display
-        if prev_show_seconds:
-            draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
-            prev_show_seconds = False
+        # step simulated seconds by +1 (wrap at 60)
+        old_s = sec_sim
+        sec_sim = (sec_sim + 1) % 60
+        new_s = sec_sim
 
-        # ----------------------------
-        # FORCE-MINUTE (exercise animation even if digits match)
-        # ----------------------------
-        if os.path.exists(FORCE_MINUTE_FILE):
-            tens, ones = divmod(m, 10)[0], divmod(m, 10)[1]  # deliberately simple
-            sequential_transition(panels, tens, tens, dx=0, dy=DIGIT_SIZE,
-                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
-                                  thickness=thickness, instant_threshold=instant_threshold,
-                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED,
-                                  animate_if_same=True)
-            sequential_transition(panels, ones, ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
-                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
-                                  thickness=thickness, instant_threshold=instant_threshold,
-                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED,
-                                  animate_if_same=True)
-            try:
-                os.remove(FORCE_MINUTE_FILE)
-            except Exception:
-                pass
+        old_tens, old_ones = divmod(old_s, 10)
+        new_tens, new_ones = divmod(new_s, 10)
+
+        # bottom-left (tens) — only animates if changed
+        if new_tens != old_tens:
+            sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
+                                  refresh_fn=refresh,
+                                  per_pixel_delay=second_delay,
+                                  thickness=thickness,
+                                  instant_threshold=instant_threshold,
+                                  bounds=(WIDTH, HEIGHT),
+                                  inverted=DISPLAY_INVERTED,
+                                  animate_if_same=False)
+
+        # bottom-right (ones) — only animates if changed
+        if new_ones != old_ones:
+            sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
+                                  refresh_fn=refresh,
+                                  per_pixel_delay=second_delay,
+                                  thickness=thickness,
+                                  instant_threshold=instant_threshold,
+                                  bounds=(WIDTH, HEIGHT),
+                                  inverted=DISPLAY_INVERTED,
+                                  animate_if_same=False)
+
+        # record last second shown
+        last_sec = sec_sim
+
+        # allow invert trigger while in seconds mode (same behavior as before)
+        if os.path.exists(TRIGGER_INVERT_FILE):
+            random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
+            DISPLAY_INVERTED = not DISPLAY_INVERTED
+            draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
+            os.remove(TRIGGER_INVERT_FILE)
+
+        # ensure the transition finished before stepping to next second:
+        # sequential_transition/play_pixels are synchronous (they sleep per pixel),
+        # so by the time we reach here the animation is done. Now wait 1s.
+        time.sleep(1.0)
+        continue
+
 
         # ----------------------------
         # NORMAL minute mode transitions
