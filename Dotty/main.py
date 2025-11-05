@@ -346,20 +346,29 @@ def transition_by_strokes(panels_obj, old_strokes, new_strokes,
 # ---------------------------
 def paint_digit_instant(panels_obj, strokes, dx=0, dy=0, inverted=False,
                         thickness=STROKE_THICKNESS_DEFAULT):
+    """
+    Paint the canonical digit defined by `strokes` into panels at offset (dx,dy).
+    Strokes are expressed in digit-local coords (0..DIGIT_SIZE-1). This function
+    will offset them into display coords and draw instantly.
+    """
     bg = 0 if not inverted else 1
     fg = 1 if not inverted else 0
 
-    # clear digit box area first
+    # 1) clear the digit box area first (to background)
     for yy in range(DIGIT_SIZE):
         for xx in range(DIGIT_SIZE):
             panels_obj.draw(dx + xx, dy + yy, bg)
 
-    # draw strokes (strokes should be pre-flipped for top-left origin)
+    # 2) draw strokes (rasterize each stroke to pixels), apply dx/dy offset
     for stroke in strokes:
-        pxs = stroke_to_ordered_pixels(stroke, thickness=thickness, bounds=(WIDTH, HEIGHT))
-        for (x, y) in pxs:
-            panels_obj.draw(x, y, fg)
+        pxs = stroke_to_ordered_pixels(stroke, thickness=thickness, bounds=(DIGIT_SIZE, DIGIT_SIZE))
+        for (sx, sy) in pxs:
+            tx, ty = sx + dx, sy + dy
+            # guard in case of bad strokes
+            if 0 <= tx < WIDTH and 0 <= ty < HEIGHT:
+                panels_obj.draw(tx, ty, fg)
 
+    # 3) final refresh
     refresh()
 
 # ---------------------------
