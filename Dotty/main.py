@@ -400,14 +400,15 @@ def main():
         # ----------------------------
         # SECONDS DEBUG MODE (simulated step-through)
         # ----------------------------
-        while show_seconds:
-            for d in range(10):
-                sequential_transition(panels, 0, d, dx=0, dy=DIGIT_SIZE,
-                                      refresh_fn=refresh, per_pixel_delay=0.1,
-                                      thickness=1, instant_threshold=0,
-                                      bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED,
-                                      animate_if_same=True)
-                time.sleep(3)
+        if show_seconds:
+            while true:
+                for d in range(10):
+                    sequential_transition(panels, 0, d, dx=0, dy=DIGIT_SIZE,
+                                          refresh_fn=refresh, per_pixel_delay=0.1,
+                                          thickness=1, instant_threshold=0,
+                                          bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED,
+                                          animate_if_same=True)
+                    time.sleep(3)
 
 
         # ----------------------------
