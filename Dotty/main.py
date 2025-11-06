@@ -385,6 +385,63 @@ def random_invert_animation(pan, refresh_fn, delay=0.01, width=WIDTH, height=HEI
             refresh_fn()
         time.sleep(delay)
 
+
+# ---------------------------
+# Random hour update
+# ---------------------------
+
+# render a pair of digits into an off-screen numpy buffer
+def render_digits_to_buffer(hour:int, bottom_val:int=None, inverted:bool=False):
+    """
+    Render top-row hours (two digits) into a (HEIGHT, WIDTH) numpy buffer.
+    If bottom_val is provided it'll render bottom row digits too (not required here).
+    Returned buffer uses same 0/1 polarity as draw calls expect.
+    """
+    buf = np.zeros((HEIGHT, WIDTH), dtype=int)
+    bg = 1 if not inverted else 0
+    fg = 0 if not inverted else 1
+
+    # fill background in the whole buffer with bg
+    buf[:, :] = bg
+
+    # helper to draw canonical strokes into the buffer
+    def draw_digit_to_buf(digit, dx, dy):
+        strokes = digit_strokes_flipped.get(digit, [])
+        for s in strokes:
+            off = offset_stroke(s, dx, dy)
+            pxs = stroke_to_ordered_pixels(off, thickness=STROKE_THICKNESS_DEFAULT, bounds=(WIDTH, HEIGHT))
+            for x, y in pxs:
+                if 0 <= x < WIDTH and 0 <= y < HEIGHT:
+                    buf[y, x] = fg
+
+    # top row (hours)
+    d1, d2 = divmod(hour, 10)
+    draw_digit_to_buf(d1, 0, 0)
+    draw_digit_to_buf(d2, DIGIT_SIZE, 0)
+
+    # optional bottom row if requested
+    if bottom_val is not None:
+        b1, b2 = divmod(bottom_val, 10)
+        draw_digit_to_buf(b1, 0, DIGIT_SIZE)
+        draw_digit_to_buf(b2, DIGIT_SIZE, DIGIT_SIZE)
+
+    return buf
+
+# random reveal: progressively write pixels from target buffer to device
+def random_reveal_buffer(pan, refresh_fn, target_buf, delay=0.01):
+    """
+    Randomly reveal pixels from target_buf onto `pan`. This writes target_buf[y,x]
+    directly (not invert). Waits until finished. Returns when all pixels written.
+    """
+    h, w = target_buf.shape
+    coords = [(x, y) for y in range(h) for x in range(w)]
+    random.shuffle(coords)
+    for x, y in coords:
+        pan.draw(x, y, int(target_buf[y, x]))
+        if refresh_fn:
+            refresh_fn()
+        time.sleep(delay)
+
 # ---------------------------
 # Main loop
 # ---------------------------
@@ -432,26 +489,33 @@ def main():
             new_tens, new_ones = divmod(m, 10)
 
             # top-of-hour: invert with random animation
+            #    Example usage: when minute == 0, reveal next hour in the middle of the random animation.
             if m == 0:
-                random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
-                DISPLAY_INVERTED = not DISPLAY_INVERTED
-
-            sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
-                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
-                                  thickness=thickness, instant_threshold=instant_threshold,
-                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-
-            sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
-                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
-                                  thickness=thickness, instant_threshold=instant_threshold,
-                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-
-            last_min = m
-
-            # if hour changed, redraw top half immediately
-            if h != last_hour:
-                draw_hours_only(h, DISPLAY_INVERTED)
-                last_hour = h
+                # compute the next hour (wrap)
+                next_h = (h + 1) % 24
+            
+                # Option A: reveal target using the new inverted polarity (toggle during reveal)
+                # If you want the reveal to show the toggled-invert state as it appears, flip first:
+                new_inverted = not DISPLAY_INVERTED
+                target = render_digits_to_buffer(next_h, bottom_val=0, inverted=new_inverted)
+            
+                # Play random reveal which writes the target pixels progressively
+                random_reveal_buffer(panels, refresh, target, delay=0.005)
+            
+                # commit the new state and update DISPLAY_INVERTED
+                DISPLAY_INVERTED = new_inverted
+                # ensure top half is accurate (optional, paint instantly)
+                draw_hours_only(next_h, DISPLAY_INVERTED)
+                # and bottom row = 00 (minute zero)
+                paint_digit_instant(panels, digit_strokes_flipped[0], dx=0, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
+                paint_digit_instant(panels, digit_strokes_flipped[0], dx=DIGIT_SIZE, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
+            
+                # NOTE: if you prefer the reveal to keep the current polarity and only update the hour,
+                # generate `target = render_digits_to_buffer(next_h, inverted=DISPLAY_INVERTED)` and
+                # call random_reveal_buffer with that instead; then set DISPLAY_INVERTED = not DISPLAY_INVERTED
+                # afterwards (if you still want to toggle polarity).
+            
+                # continue (skip the usual sequential_transition for minute digits if desired)
 
         # ----------------------------
         # SSH invert trigger (normal mode)
