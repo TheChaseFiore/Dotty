@@ -469,15 +469,71 @@ def main():
         # ----------------------------
         # SECONDS DEBUG MODE (simulated step-through)
         # ----------------------------
+
         if show_seconds:
-            while true:
-                for d in range(10):
-                    sequential_transition(panels, 0, d, dx=0, dy=DIGIT_SIZE,
-                                          refresh_fn=refresh, per_pixel_delay=0.1,
-                                          thickness=1, instant_threshold=0,
-                                          bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED,
-                                          animate_if_same=True)
-                    time.sleep(3)
+            # entering simulated-seconds mode: reset counter and draw initial state
+            if not prev_show_seconds:
+                sec_sim = 0
+                draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
+                prev_show_seconds = True
+                time.sleep(0.05)
+                continue
+
+            # Run simulated stepping while the file exists.
+            # This inner loop checks the file every iteration so we can exit cleanly.
+            while os.path.exists(SHOW_SECONDS_FILE):
+                old_s = sec_sim
+                sec_sim = (sec_sim + 1) % 60
+                new_s = sec_sim
+
+                old_tens, old_ones = divmod(old_s, 10)
+                new_tens, new_ones = divmod(new_s, 10)
+
+                # tens (bottom-left)
+                if new_tens != old_tens:
+                    sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
+                                          refresh_fn=refresh,
+                                          per_pixel_delay=second_delay,
+                                          thickness=thickness,
+                                          instant_threshold=instant_threshold,
+                                          bounds=(WIDTH, HEIGHT),
+                                          inverted=DISPLAY_INVERTED,
+                                          animate_if_same=False)
+
+                # ones (bottom-right)
+                if new_ones != old_ones:
+                    sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
+                                          refresh_fn=refresh,
+                                          per_pixel_delay=second_delay,
+                                          thickness=thickness,
+                                          instant_threshold=instant_threshold,
+                                          bounds=(WIDTH, HEIGHT),
+                                          inverted=DISPLAY_INVERTED,
+                                          animate_if_same=False)
+
+                # record last second shown (optional)
+                last_sec = sec_sim
+
+                # allow invert trigger while in seconds mode
+                if os.path.exists(TRIGGER_INVERT_FILE):
+                    random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
+                    DISPLAY_INVERTED = not DISPLAY_INVERTED
+                    draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
+                    try:
+                        os.remove(TRIGGER_INVERT_FILE)
+                    except Exception:
+                        pass
+
+                # wait exactly 1 second between steps
+                time.sleep(1.0)
+
+            # we exited seconds mode
+            prev_show_seconds = False
+            # ensure minutes are re-drawn when coming back
+            h, m, _ = get_time()
+            draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
+            continue
+
 
 
         # ----------------------------
@@ -488,20 +544,18 @@ def main():
             old_tens, old_ones = divmod(old_m, 10)
             new_tens, new_ones = divmod(m, 10)
 
-            # top-of-hour: invert with random animation
-            #    Example usage: when minute == 0, reveal next hour in the middle of the random animation.
+            # top-of-hour: invert with random animation (run once)
             if m == 0:
                 # compute the next hour (wrap)
                 next_h = (h + 1) % 24
-            
-                # Option A: reveal target using the new inverted polarity (toggle during reveal)
-                # If you want the reveal to show the toggled-invert state as it appears, flip first:
+
+                # Option: render reveal using the new inverted polarity
                 new_inverted = not DISPLAY_INVERTED
                 target = render_digits_to_buffer(next_h, bottom_val=0, inverted=new_inverted)
-            
-                # Play random reveal which writes the target pixels progressively
+
+                # Play random reveal which writes the target pixels progressively (blocking)
                 random_reveal_buffer(panels, refresh, target, delay=0.005)
-            
+
                 # commit the new state and update DISPLAY_INVERTED
                 DISPLAY_INVERTED = new_inverted
                 # ensure top half is accurate (optional, paint instantly)
@@ -509,13 +563,25 @@ def main():
                 # and bottom row = 00 (minute zero)
                 paint_digit_instant(panels, digit_strokes_flipped[0], dx=0, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
                 paint_digit_instant(panels, digit_strokes_flipped[0], dx=DIGIT_SIZE, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
-            
-                # NOTE: if you prefer the reveal to keep the current polarity and only update the hour,
-                # generate `target = render_digits_to_buffer(next_h, inverted=DISPLAY_INVERTED)` and
-                # call random_reveal_buffer with that instead; then set DISPLAY_INVERTED = not DISPLAY_INVERTED
-                # afterwards (if you still want to toggle polarity).
-            
-                # continue (skip the usual sequential_transition for minute digits if desired)
+
+            # run minute-digit transitions for normal changes (still happens even at top of hour)
+            sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
+                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
+                                  thickness=thickness, instant_threshold=instant_threshold,
+                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
+
+            sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
+                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
+                                  thickness=thickness, instant_threshold=instant_threshold,
+                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
+
+            # mark we've handled this minute so top-of-hour won't loop
+            last_min = m
+
+            # if hour changed, redraw top half immediately (or use the revealed hour)
+            if h != last_hour:
+                draw_hours_only(h, DISPLAY_INVERTED)
+                last_hour = h
 
         # ----------------------------
         # SSH invert trigger (normal mode)
