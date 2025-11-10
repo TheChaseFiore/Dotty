@@ -27,7 +27,6 @@ class matrix:
     def len(self):
         return len(self.panel)
 
-    # ✅ FIXED VERSION
     def get(self, x, y):
         """
         Return 1/0 for pixel at (x, y).
