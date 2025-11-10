@@ -355,7 +355,7 @@ def sequential_transition(pan, from_digit:int, to_digit:int, dx:int, dy:int,
         play_pixels_invert(pan, pixels, refresh_fn=refresh_fn, per_pixel_delay=per_pixel_delay)
     
     # final snap to canonical digit for pixel-perfect result (no-op if already exact)
-    time.sleep(2)
+    time.sleep(delay)
     paint_digit_instant(pan, digit_strokes_flipped[to_digit], dx=dx, dy=dy, inverted=inverted, thickness=thickness)
 
 # ---------------------------
@@ -539,49 +539,34 @@ def main():
         # ----------------------------
         # NORMAL minute mode transitions
         # ----------------------------
-        if m != last_min:
+        if m == 0:
+            reveal_hour = h
+            new_inverted = not DISPLAY_INVERTED
+            target = render_digits_to_buffer(reveal_hour, bottom_val=0, inverted=new_inverted)
+            random_reveal_buffer(panels, refresh, target, delay=0.005)
+            DISPLAY_INVERTED = new_inverted
+            draw_hours_only(reveal_hour, DISPLAY_INVERTED)
+            paint_digit_instant(panels, digit_strokes_flipped[0], dx=0, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
+            paint_digit_instant(panels, digit_strokes_flipped[0], dx=DIGIT_SIZE, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
+            last_hour = reveal_hour
+
+            # re-read time to avoid racing with long reveal
+            h, m, _ = get_time()
             old_m = last_min if last_min >= 0 else m
             old_tens, old_ones = divmod(old_m, 10)
             new_tens, new_ones = divmod(m, 10)
-
-            # top-of-hour: invert with random animation (run once)
-            if m == 0:
-                # compute the next hour (wrap)
-                next_h = (h + 1) % 24
-
-                # Option: render reveal using the new inverted polarity
-                new_inverted = not DISPLAY_INVERTED
-                target = render_digits_to_buffer(next_h, bottom_val=0, inverted=new_inverted)
-
-                # Play random reveal which writes the target pixels progressively (blocking)
-                random_reveal_buffer(panels, refresh, target, delay=0.005)
-
-                # commit the new state and update DISPLAY_INVERTED
-                DISPLAY_INVERTED = new_inverted
-                # ensure top half is accurate (optional, paint instantly)
-                draw_hours_only(next_h, DISPLAY_INVERTED)
-                # and bottom row = 00 (minute zero)
-                paint_digit_instant(panels, digit_strokes_flipped[0], dx=0, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
-                paint_digit_instant(panels, digit_strokes_flipped[0], dx=DIGIT_SIZE, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
-
-            # run minute-digit transitions for normal changes (still happens even at top of hour)
+    
             sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
                                   refresh_fn=refresh, per_pixel_delay=minute_delay,
                                   thickness=thickness, instant_threshold=instant_threshold,
                                   bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-
+    
             sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
                                   refresh_fn=refresh, per_pixel_delay=minute_delay,
                                   thickness=thickness, instant_threshold=instant_threshold,
                                   bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-
-            # mark we've handled this minute so top-of-hour won't loop
+    
             last_min = m
-
-            # if hour changed, redraw top half immediately (or use the revealed hour)
-            if h != last_hour:
-                draw_hours_only(h, DISPLAY_INVERTED)
-                last_hour = h
 
         # ----------------------------
         # SSH invert trigger (normal mode)
