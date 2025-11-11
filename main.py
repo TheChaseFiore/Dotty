@@ -550,23 +550,23 @@ def main():
             paint_digit_instant(panels, digit_strokes_flipped[0], dx=DIGIT_SIZE, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
             last_hour = reveal_hour
 
-            # re-read time to avoid racing with long reveal
-            h, m, _ = get_time()
-            old_m = last_min if last_min >= 0 else m
-            old_tens, old_ones = divmod(old_m, 10)
-            new_tens, new_ones = divmod(m, 10)
-    
-            sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
-                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
-                                  thickness=thickness, instant_threshold=instant_threshold,
-                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-    
-            sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
-                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
-                                  thickness=thickness, instant_threshold=instant_threshold,
-                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-    
-            last_min = m
+        # re-read time to avoid racing with long reveal
+        h, m, _ = get_time()
+        old_m = last_min if last_min >= 0 else m
+        old_tens, old_ones = divmod(old_m, 10)
+        new_tens, new_ones = divmod(m, 10)
+
+        sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
+                              refresh_fn=refresh, per_pixel_delay=minute_delay,
+                              thickness=thickness, instant_threshold=instant_threshold,
+                              bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
+
+        sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
+                              refresh_fn=refresh, per_pixel_delay=minute_delay,
+                              thickness=thickness, instant_threshold=instant_threshold,
+                              bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
+
+        last_min = m
 
         # ----------------------------
         # SSH invert trigger (normal mode)
