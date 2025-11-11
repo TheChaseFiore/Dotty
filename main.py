@@ -299,7 +299,7 @@ def offset_stroke(stroke: Iterable[Tuple[int,int]], dx:int=0, dy:int=0):
 # Canonical paint utility
 # ---------------------------
 def paint_digit_instant(pan, strokes: List[List[Tuple[int,int]]], dx=0, dy=0, inverted=False,
-                        thickness=STROKE_THICKNESS_DEFAULT):
+                        thickness=STROKE_THICKNESS_DEFAULT, refresh_fn=None):
     """Clear digit box and draw canonical strokes instantly."""
     bg = 1 if not inverted else 0   # keep your panel polarity mapping here
     fg = 0 if not inverted else 1
@@ -311,14 +311,15 @@ def paint_digit_instant(pan, strokes: List[List[Tuple[int,int]]], dx=0, dy=0, in
 
     # draw each stroke (rasterize in display coords)
     for s in strokes:
-        # offset the stroke into display coords, then rasterize with display bounds
         off = offset_stroke(s, dx, dy)
         pxs = stroke_to_ordered_pixels(off, thickness=thickness, bounds=(WIDTH, HEIGHT))
         for tx, ty in pxs:
             if 0 <= tx < WIDTH and 0 <= ty < HEIGHT:
                 pan.draw(tx, ty, fg)
 
-    refresh()
+    # caller decides whether/when to refresh
+    if refresh_fn:
+        refresh_fn()
 
 # ---------------------------
 # Proper sequential transition:
@@ -355,7 +356,7 @@ def sequential_transition(pan, from_digit:int, to_digit:int, dx:int, dy:int,
         play_pixels_invert(pan, pixels, refresh_fn=refresh_fn, per_pixel_delay=per_pixel_delay)
     
     # final snap to canonical digit for pixel-perfect result (no-op if already exact)
-    time.sleep(delay)
+    time.sleep(per_pixel_delay)
     paint_digit_instant(pan, digit_strokes_flipped[to_digit], dx=dx, dy=dy, inverted=inverted, thickness=thickness)
 
 # ---------------------------
