@@ -44,10 +44,16 @@ import paho.mqtt.client as mqtt
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("dotty.mqtt")
 
-MQTT_BROKER = os.environ.get("DOTTY_MQTT_BROKER", "192.168.2.100")
-MQTT_PORT   = int(os.environ.get("DOTTY_MQTT_PORT", "1883"))
-MQTT_USER   = os.environ.get("DOTTY_MQTT_USER")  # may be None
-MQTT_PASS   = os.environ.get("DOTTY_MQTT_PASS")  # may be None
+host = os.getenv("DOTTY_MQTT_HOST", "localhost")
+port = int(os.getenv("DOTTY_MQTT_PORT", 1883))
+user = os.getenv("DOTTY_MQTT_USER", "")
+password = os.getenv("DOTTY_MQTT_PASS", "")
+
+client = mqtt.Client()
+if user:
+    client.username_pw_set(user, password)
+client.connect(host, port)
+client.loop_start()
 
 def make_client():
     # use the modern callback API and a unique client id
