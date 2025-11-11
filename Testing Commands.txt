@@ -18,3 +18,9 @@ sudo systemctl restart dotty.service
 
 #debug
 sudo journalctl -u dotty.service -f
+
+#start at boot location
+sudo nano /etc/systemd/system/dotty.service
+
+#update script location
+sudo nano /usr/local/bin/run-dotty.sh
