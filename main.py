@@ -11,6 +11,10 @@ import numpy as np
 import serial_port
 import matrix
 
+import threading
+import queue
+import paho.mqtt.client as mqtt
+
 # ---------------------------
 # Config / files / constants
 # ---------------------------
@@ -29,6 +33,40 @@ SEC_SNAKE_DELAY_DEFAULT = 0.02
 
 INSTANT_THRESHOLD_DEFAULT = 0
 STROKE_THICKNESS_DEFAULT = 1
+
+
+# ---------------------------
+# MQTT control (Home Assistant)
+# ---------------------------
+# These can be configured via environment variables:
+MQTT_BROKER = os.environ.get("DOTTY_MQTT_BROKER", "localhost")
+MQTT_PORT = int(os.environ.get("DOTTY_MQTT_PORT", "1883"))
+MQTT_USER = os.environ.get("DOTTY_MQTT_USER", "")
+MQTT_PASS = os.environ.get("DOTTY_MQTT_PASS", "")
+MQTT_TOPIC = os.environ.get("DOTTY_MQTT_TOPIC", "dotty/command")  # listen here
+
+# Thread-safe command queue used by main loop
+command_queue = queue.Queue()
+
+def mqtt_on_connect(client, userdata, flags, rc):
+    # rc==0 is success
+    if rc == 0:
+        print("MQTT connected, subscribing to", MQTT_TOPIC)
+        client.subscribe(MQTT_TOPIC)
+    else:
+        print("MQTT connect failed rc=", rc)
+
+def mqtt_on_message(client, userdata, msg):
+    try:
+        payload = msg.payload.decode().strip().lower()
+    except Exception:
+        return
+    # Accept either single words or JSON in the future; keep simple now
+    if payload in ("blank", "refresh"):
+        print("MQTT: received command:", payload)
+        command_queue.put(payload)
+    else:
+        print("MQTT: unknown payload:", payload)
 
 # ---------------------------
 # Digit stroke definitions (14x14 coordinate grid 0..13)
@@ -386,6 +424,14 @@ def random_invert_animation(pan, refresh_fn, delay=0.01, width=WIDTH, height=HEI
             refresh_fn()
         time.sleep(delay)
 
+def clear_display(pan, inverted=False, refresh_fn=refresh):
+    """Fill entire display with background (blank)."""
+    bg = 1 if not inverted else 0
+    for y in range(HEIGHT):
+        for x in range(WIDTH):
+            pan.draw(x, y, bg)
+    if refresh_fn:
+        refresh_fn()
 
 # ---------------------------
 # Random hour update
@@ -443,6 +489,24 @@ def random_reveal_buffer(pan, refresh_fn, target_buf, delay=0.01):
             refresh_fn()
         time.sleep(delay)
 
+
+# Setup MQTT client (run in background thread)
+mqtt_client = mqtt.Client()
+if MQTT_USER:
+    mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
+mqtt_client.on_connect = mqtt_on_connect
+mqtt_client.on_message = mqtt_on_message
+
+def start_mqtt():
+    try:
+        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+        mqtt_client.loop_start()  # runs the network loop in a background thread
+    except Exception as e:
+        print("MQTT start failed:", e)
+
+# start MQTT now
+start_mqtt()
+
 # ---------------------------
 # Main loop
 # ---------------------------
@@ -466,7 +530,19 @@ def main():
         second_delay = read_delay(SEC_SNAKE_DELAY_FILE, SEC_SNAKE_DELAY_DEFAULT)
         instant_threshold = INSTANT_THRESHOLD_DEFAULT
         thickness = STROKE_THICKNESS_DEFAULT
-
+        # ---- handle inbound MQTT commands (if any) ----
+        while not command_queue.empty():
+            cmd = command_queue.get_nowait()
+            if cmd == "blank":
+                print("Command: blank -> clearing display")
+                clear_display(panels, inverted=DISPLAY_INVERTED, refresh_fn=refresh)
+            elif cmd == "refresh":
+                print("Command: refresh -> redrawing time")
+                # redraw current time immediately
+                h, m, s = get_time()
+                draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
+            # mark done (queue.get removed it)
+        
         # ----------------------------
         # SECONDS DEBUG MODE (simulated step-through)
         # ----------------------------
@@ -551,23 +627,23 @@ def main():
             paint_digit_instant(panels, digit_strokes_flipped[0], dx=DIGIT_SIZE, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
             last_hour = reveal_hour
 
-        # re-read time to avoid racing with long reveal
-        h, m, _ = get_time()
-        old_m = last_min if last_min >= 0 else m
-        old_tens, old_ones = divmod(old_m, 10)
-        new_tens, new_ones = divmod(m, 10)
-
-        sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
-                              refresh_fn=refresh, per_pixel_delay=minute_delay,
-                              thickness=thickness, instant_threshold=instant_threshold,
-                              bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-
-        sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
-                              refresh_fn=refresh, per_pixel_delay=minute_delay,
-                              thickness=thickness, instant_threshold=instant_threshold,
-                              bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-
-        last_min = m
+            # re-read time to avoid racing with long reveal
+            h, m, _ = get_time()
+            old_m = last_min if last_min >= 0 else m
+            old_tens, old_ones = divmod(old_m, 10)
+            new_tens, new_ones = divmod(m, 10)
+    
+            sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
+                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
+                                  thickness=thickness, instant_threshold=instant_threshold,
+                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
+    
+            sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
+                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
+                                  thickness=thickness, instant_threshold=instant_threshold,
+                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
+    
+            last_min = m
 
         # ----------------------------
         # SSH invert trigger (normal mode)
