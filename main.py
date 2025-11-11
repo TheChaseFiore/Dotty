@@ -13,6 +13,8 @@ import matrix
 
 import threading
 import queue
+
+import logging
 import paho.mqtt.client as mqtt
 
 # ---------------------------
@@ -38,8 +40,7 @@ STROKE_THICKNESS_DEFAULT = 1
 # ---------------------------
 # MQTT control (Home Assistant)
 # ---------------------------
-import os, time, random, logging
-import paho.mqtt.client as mqtt
+
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("dotty.mqtt")
@@ -58,7 +59,7 @@ client.loop_start()
 def make_client():
     # use the modern callback API and a unique client id
     cid = f"dotty-{os.uname().nodename}-{random.getrandbits(32):08x}"
-    client = mqtt.Client(client_id=cid, callback_api_version=2)
+    client = mqtt.Client(client_id="", protocol=mqtt.MQTTv311)  # newer style
     if MQTT_USER:
         client.username_pw_set(MQTT_USER, MQTT_PASS)
     # set will (optional)
