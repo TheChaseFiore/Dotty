@@ -11,7 +11,6 @@ import numpy as np
 import serial_port
 import matrix
 
-import threading
 import queue
 
 import logging
@@ -40,34 +39,18 @@ STROKE_THICKNESS_DEFAULT = 1
 # ---------------------------
 # MQTT control (Home Assistant)
 # ---------------------------
-
-
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("dotty.mqtt")
 
-host = os.getenv("DOTTY_MQTT_HOST", "localhost")
-port = int(os.getenv("DOTTY_MQTT_PORT", 1883))
-user = os.getenv("DOTTY_MQTT_USER", "")
-password = os.getenv("DOTTY_MQTT_PASS", "")
+MQTT_BROKER = os.getenv("DOTTY_MQTT_HOST", "localhost")
+MQTT_PORT = int(os.getenv("DOTTY_MQTT_PORT", 1883))
+MQTT_USER = os.getenv("DOTTY_MQTT_USER", "")
+MQTT_PASS = os.getenv("DOTTY_MQTT_PASS", "")
 
-client = mqtt.Client()
-if user:
-    client.username_pw_set(user, password)
-client.connect(host, port)
-client.loop_start()
-
-def make_client():
-    # use the modern callback API and a unique client id
-    cid = f"dotty-{os.uname().nodename}-{random.getrandbits(32):08x}"
-    client = mqtt.Client(client_id="", protocol=mqtt.MQTTv311)  # newer style
-    if MQTT_USER:
-        client.username_pw_set(MQTT_USER, MQTT_PASS)
-    # set will (optional)
-    client.will_set("dotty/status", payload="offline", qos=1, retain=True)
-    return client
+command_queue = queue.Queue()
 
 def on_connect(client, userdata, flags, rc, properties=None):
-    log.info("MQTT connected rc=%s flags=%s props=%s", rc, flags, properties)
+    log.info("MQTT connected rc=%s", rc)
     if rc == 0:
         client.publish("dotty/status", "online", qos=1, retain=True)
         client.subscribe("dotty/command")
@@ -77,17 +60,19 @@ def on_connect(client, userdata, flags, rc, properties=None):
 def on_message(client, userdata, msg):
     payload = msg.payload.decode(errors="ignore")
     log.info("MQTT RX %s -> %s", msg.topic, payload)
-    # push payload into your command queue or handle it inline
+    command_queue.put(payload.strip())
 
 def on_disconnect(client, userdata, rc):
     log.warning("MQTT disconnected rc=%s", rc)
 
-mqtt_client = make_client()
+mqtt_client = mqtt.Client(client_id=f"dotty-{os.uname().nodename}-{random.getrandbits(32):08x}")
+if MQTT_USER:
+    mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
+
 mqtt_client.on_connect = on_connect
 mqtt_client.on_message = on_message
 mqtt_client.on_disconnect = on_disconnect
 
-# Connect with retry/backoff (non-blocking using loop_start)
 def start_mqtt():
     backoff = 1.0
     while True:
@@ -102,6 +87,7 @@ def start_mqtt():
             backoff = min(backoff * 2.0, 60.0)
 
 start_mqtt()
+
 
 
 # ---------------------------
@@ -697,4 +683,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        log.info("Dotty stopped by user.")
+        mqtt_client.publish("dotty/status", "offline", retain=True)
+        mqtt_client.loop_stop()
