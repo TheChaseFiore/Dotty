@@ -484,6 +484,23 @@ def start_mqtt_background():
 # start MQTT in background thread so main loop isn't blocked
 threading.Thread(target=start_mqtt_background, daemon=True).start()
 
+# ensure mqtt thread can't prevent process exit and publish heartbeat
+def heartbeat_task():
+    while True:
+        try:
+            mqtt_client.publish("dotty/heartbeat", "alive", qos=0, retain=False)
+        except Exception:
+            pass
+        time.sleep(30)
+
+# start mqtt background connect thread (daemon)
+t = threading.Thread(target=start_mqtt_background, daemon=True)
+t.start()
+
+# start lightweight heartbeat so we can watch activity (daemon)
+hb = threading.Thread(target=heartbeat_task, daemon=True)
+hb.start()
+
 # ---------------------------
 # Main loop
 # ---------------------------
