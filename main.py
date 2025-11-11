@@ -38,35 +38,64 @@ STROKE_THICKNESS_DEFAULT = 1
 # ---------------------------
 # MQTT control (Home Assistant)
 # ---------------------------
-# These can be configured via environment variables:
-MQTT_BROKER = os.environ.get("DOTTY_MQTT_BROKER", "localhost")
-MQTT_PORT = int(os.environ.get("DOTTY_MQTT_PORT", "1883"))
-MQTT_USER = os.environ.get("DOTTY_MQTT_USER", "")
-MQTT_PASS = os.environ.get("DOTTY_MQTT_PASS", "")
-MQTT_TOPIC = os.environ.get("DOTTY_MQTT_TOPIC", "dotty/command")  # listen here
+import os, time, random, logging
+import paho.mqtt.client as mqtt
 
-# Thread-safe command queue used by main loop
-command_queue = queue.Queue()
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("dotty.mqtt")
 
-def mqtt_on_connect(client, userdata, flags, rc):
-    # rc==0 is success
+MQTT_BROKER = os.environ.get("DOTTY_MQTT_BROKER", "192.168.2.100")
+MQTT_PORT   = int(os.environ.get("DOTTY_MQTT_PORT", "1883"))
+MQTT_USER   = os.environ.get("DOTTY_MQTT_USER")  # may be None
+MQTT_PASS   = os.environ.get("DOTTY_MQTT_PASS")  # may be None
+
+def make_client():
+    # use the modern callback API and a unique client id
+    cid = f"dotty-{os.uname().nodename}-{random.getrandbits(32):08x}"
+    client = mqtt.Client(client_id=cid, callback_api_version=2)
+    if MQTT_USER:
+        client.username_pw_set(MQTT_USER, MQTT_PASS)
+    # set will (optional)
+    client.will_set("dotty/status", payload="offline", qos=1, retain=True)
+    return client
+
+def on_connect(client, userdata, flags, rc, properties=None):
+    log.info("MQTT connected rc=%s flags=%s props=%s", rc, flags, properties)
     if rc == 0:
-        print("MQTT connected, subscribing to", MQTT_TOPIC)
-        client.subscribe(MQTT_TOPIC)
+        client.publish("dotty/status", "online", qos=1, retain=True)
+        client.subscribe("dotty/command")
     else:
-        print("MQTT connect failed rc=", rc)
+        log.warning("MQTT connect failed rc=%s", rc)
 
-def mqtt_on_message(client, userdata, msg):
-    try:
-        payload = msg.payload.decode().strip().lower()
-    except Exception:
-        return
-    # Accept either single words or JSON in the future; keep simple now
-    if payload in ("blank", "refresh"):
-        print("MQTT: received command:", payload)
-        command_queue.put(payload)
-    else:
-        print("MQTT: unknown payload:", payload)
+def on_message(client, userdata, msg):
+    payload = msg.payload.decode(errors="ignore")
+    log.info("MQTT RX %s -> %s", msg.topic, payload)
+    # push payload into your command queue or handle it inline
+
+def on_disconnect(client, userdata, rc):
+    log.warning("MQTT disconnected rc=%s", rc)
+
+mqtt_client = make_client()
+mqtt_client.on_connect = on_connect
+mqtt_client.on_message = on_message
+mqtt_client.on_disconnect = on_disconnect
+
+# Connect with retry/backoff (non-blocking using loop_start)
+def start_mqtt():
+    backoff = 1.0
+    while True:
+        try:
+            log.info("Attempting mqtt connect to %s:%s", MQTT_BROKER, MQTT_PORT)
+            mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+            mqtt_client.loop_start()
+            return
+        except Exception as e:
+            log.error("MQTT start failed: %s — retrying in %s sec", e, backoff)
+            time.sleep(backoff)
+            backoff = min(backoff * 2.0, 60.0)
+
+start_mqtt()
+
 
 # ---------------------------
 # Digit stroke definitions (14x14 coordinate grid 0..13)
