@@ -1,28 +1,24 @@
 #!/usr/bin/env python3
-"""
-main.py — Dotty (cleaned + MQTT command queue + sequential stroke transitions)
-
-Features:
-- stroke-based digits & sequential transitions
-- MQTT control: publish status, subscribe to dotty/command, accept "blank" and "refresh"
-- env-driven MQTT config: DOTTY_MQTT_HOST, DOTTY_MQTT_PORT, DOTTY_MQTT_USER, DOTTY_MQTT_PASS
-"""
 
 import os
 import time
 import random
-import logging
-import queue
-import threading
 from datetime import datetime
-from typing import List, Tuple, Iterable, Iterable as IterableType
+from typing import List, Tuple, Iterable
+import threading
+import queue
+import logging
 
 import numpy as np
-import paho.mqtt.client as mqtt
 
-# local hardware modules (must exist in repo)
 import serial_port
 import matrix
+
+# optional: paho mqtt
+try:
+    import paho.mqtt.client as mqtt
+except Exception:
+    mqtt = None
 
 # ---------------------------
 # Config / files / constants
@@ -46,170 +42,103 @@ STROKE_THICKNESS_DEFAULT = 1
 # ---------------------------
 # Logging
 # ---------------------------
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 log = logging.getLogger("dotty")
 
 # ---------------------------
-# MQTT config (from env)
+# Command queue (MQTT -> main)
 # ---------------------------
-MQTT_BROKER = os.getenv("DOTTY_MQTT_HOST", "localhost")
-MQTT_PORT = int(os.getenv("DOTTY_MQTT_PORT", "1883"))
+command_queue = queue.Queue()
+
+# ---------------------------
+# MQTT config from env
+# ---------------------------
+MQTT_BROKER = os.getenv("DOTTY_MQTT_BROKER", os.getenv("DOTTY_MQTT_HOST", "localhost"))
+MQTT_PORT = int(os.getenv("DOTTY_MQTT_PORT", os.getenv("DOTTY_MQTT_PORT", 1883)))
 MQTT_USER = os.getenv("DOTTY_MQTT_USER", "")
 MQTT_PASS = os.getenv("DOTTY_MQTT_PASS", "")
 
-# command queue used by MQTT on_message to hand commands to the main loop
-command_queue: "queue.Queue[str]" = queue.Queue()
+# ---------------------------
+# MQTT callbacks
+# ---------------------------
+def _mqtt_on_connect(client, userdata, flags, rc, properties=None):
+    log.info("MQTT connected rc=%s flags=%s", rc, flags)
+    if rc == 0:
+        client.publish("dotty/status", "online", qos=1, retain=True)
+        client.subscribe("dotty/command")
+    else:
+        log.warning("MQTT connect returned rc=%s", rc)
+
+def _mqtt_on_message(client, userdata, msg):
+    try:
+        payload = msg.payload.decode(errors="ignore").strip()
+    except Exception:
+        payload = "<binary>"
+    log.info("MQTT RX %s -> %s", msg.topic, payload)
+    # only enqueue short commands; keep callbacks tiny
+    if payload:
+        try:
+            command_queue.put_nowait(payload)
+        except queue.Full:
+            log.warning("Command queue full; dropping MQTT command")
+
+def _mqtt_on_disconnect(client, userdata, rc):
+    log.warning("MQTT disconnected rc=%s", rc)
 
 # ---------------------------
-# Digit stroke definitions (14x14 coordinate grid 0..13)
-# (kept equivalent to your authored strokes)
+# MQTT client management (single instance)
 # ---------------------------
-digit_strokes = {
-    0: [
-        [(2,11),(11,11)],
-        [(11,11),(11,2)],
-        [(11,2),(2,2)],
-        [(2,2),(2,11)],
-    ],
-    1: [
-        [(6,11),(7,11)],
-        [(7,11),(7,2)],
-    ],
-    2: [
-        [(2,11),(11,11)],
-        [(11,11),(11,7)],
-        [(11,7),(2,7)],
-        [(2,7),(2,2)],
-        [(2,2),(11,2)],
-    ],
-    3: [
-        [(2,11),(11,11)],
-        [(11,11),(11,2)],
-        [(11,2),(2,2)],
-        [(11,7),(4,7)],
-    ],
-    4: [
-        [(2,11),(2,7)],
-        [(2,7),(11,7)],
-        [(11,11),(11,2)],
-    ],
-    5: [
-        [(11,11),(2,11)],
-        [(2,11),(2,7)],
-        [(2,7),(11,7)],
-        [(11,7),(11,2)],
-        [(11,2),(2,2)],
-    ],
-    6: [
-        [(11,11),(2,11)],
-        [(2,11),(2,2)],
-        [(2,2),(11,2)],
-        [(11,2),(11,7)],
-        [(11,7),(2,7)],
-    ],
-    7: [
-        [(2,11),(11,11)],
-        [(11,11),(11,2)],
-    ],
-    8: [
-        [(2,11),(11,11)],
-        [(11,11),(11,2)],
-        [(11,2),(2,2)],
-        [(2,2),(2,11)],
-        [(2,7),(11,7)],
-    ],
-    9: [
-        [(2,11),(11,11)],
-        [(11,11),(11,2)],
-        [(2,11),(2,7)],
-        [(2,7),(11,7)],
-    ],
-}
+mqtt_client = None
+def build_mqtt_client():
+    global mqtt_client
+    if mqtt is None:
+        log.warning("paho.mqtt not available; MQTT will be disabled")
+        return None
+    # use client id that is reasonably unique
+    client_id = f"dotty-{os.uname().nodename}-{random.getrandbits(32):08x}"
+    # Use MQTTv311 (most common) - paho default
+    client = mqtt.Client(client_id=client_id, protocol=mqtt.MQTTv311)
+    if MQTT_USER:
+        client.username_pw_set(MQTT_USER, MQTT_PASS)
+    client.on_connect = _mqtt_on_connect
+    client.on_message = _mqtt_on_message
+    client.on_disconnect = _mqtt_on_disconnect
+    return client
 
-sequential_strokes = {
-    1: [
-        [(2,11),(11,11)],
-        [(11,10),(11,2)],
-        [(10,2),(2,2)],
-        [(2,3),(2,10)],
-        [(6,11),(7,11)],
-        [(7,10),(7,2)],
-    ],
-    2: [
-        [(7,10),(7,2)],
-        [(2,11),(5,11)],
-        [(8,11),(11,11)],
-        [(11,10),(11,7)],
-        [(10,7),(2,7)],
-        [(2,6),(2,2)],
-        [(3,2),(11,2)],
-    ],
-    3: [
-        [(2,3),(2,7)],
-        [(3,7),(3,7)],
-        [(11,3),(11,6)],
-    ],
-    4: [
-        [(10,11),(2,11)],
-        [(2,11),(2,7)],
-        [(3,7),(3,7)],
-        [(10,2),(2,2)],
-    ],
-    5: [
-        [(2,2),(10,2)],
-        [(11,8),(11,10)],
-        [(10,11),(3,11)],
-    ],
-    6: [
-        [(2,6),(2,3)],
-    ],
-    7: [
-        [(2,10),(2,2)],
-        [(3,2),(11,2)],
-        [(11,3),(11,7)],
-        [(10,7),(3,7)],
-        [(11,10),(11,2)],
-    ],
-    8: [
-        [(2,10),(2,2)],
-        [(3,2),(10,2)],
-        [(10,7),(3,7)],
-    ],
-    9: [
-        [(2,6),(2,2)],
-        [(3,2),(10,2)],
-    ],
-    0: [
-        [(10,7),(3,7)],
-        [(2,6),(2,2)],
-        [(3,2),(10,2)],
-    ],
-}
+def start_mqtt_background():
+    """Start MQTT non-blocking with retries (runs in its own thread)."""
+    global mqtt_client
+    mqtt_client = build_mqtt_client()
+    if mqtt_client is None:
+        return
+    backoff = 1.0
+    while True:
+        try:
+            log.info("Attempting MQTT connect to %s:%s", MQTT_BROKER, MQTT_PORT)
+            mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+            mqtt_client.loop_start()   # non-blocking
+            log.info("MQTT loop started")
+            return
+        except Exception as e:
+            log.exception("MQTT start failed: %s - retrying in %.1fs", e, backoff)
+            time.sleep(backoff)
+            backoff = min(backoff * 2.0, 60.0)
+
+# Start MQTT thread as a daemon so it can't block exit
+if mqtt is not None:
+    t = threading.Thread(target=start_mqtt_background, name="mqtt-start", daemon=True)
+    t.start()
+else:
+    log.info("MQTT support disabled (paho not installed)")
 
 # ---------------------------
-# Utilities
+# Utilities / hardware wrappers
 # ---------------------------
-def flip_stroke_y(stroke: IterableType[Tuple[int,int]], size: int = DIGIT_SIZE):
-    """Flip authored bottom-left Y -> top-left hardware Y"""
-    return [(x, (size - 1) - y) for (x, y) in stroke]
-
-def flip_all(strokes_map):
-    return {d: [flip_stroke_y(s) for s in s_list] for d, s_list in strokes_map.items()}
-
-digit_strokes_flipped = flip_all(digit_strokes)
-sequential_strokes_flipped = flip_all(sequential_strokes)
-
-for d in range(10):
-    if d not in sequential_strokes_flipped:
-        log.warning("Warning: no sequential strokes for %d", d)
-
-# hardware init
-panels = matrix.matrix(4)
-rs232 = serial_port.initiate_serial()
-DISPLAY_INVERTED = False
-
 def refresh(flaggs=True):
-    serial_port.refresh(panels, rs232, flaggs)
+    try:
+        serial_port.refresh(panels, rs232, flaggs)
+    except Exception:
+        log.exception("refresh() failed")
 
 def get_time():
     now = datetime.now()
@@ -219,7 +148,10 @@ def capture_screen(pan, width=WIDTH, height=HEIGHT):
     buf = np.zeros((height, width), dtype=int)
     for y in range(height):
         for x in range(width):
-            buf[y, x] = int(pan.get(x, y))
+            try:
+                buf[y, x] = int(pan.get(x, y))
+            except Exception:
+                buf[y, x] = 0
     return buf
 
 def draw_buffer(pan, buf, refresh_fn=None):
@@ -267,7 +199,6 @@ def bresenham_line(x0, y0, x1, y1):
 def stroke_to_ordered_pixels(stroke: List[Tuple[int,int]],
                              thickness:int = STROKE_THICKNESS_DEFAULT,
                              bounds:Tuple[int,int] = (WIDTH, HEIGHT)):
-    """Rasterize a stroke (series of points) -> ordered pixel list."""
     w, h = bounds
     pts = []
     seen = set()
@@ -290,60 +221,93 @@ def stroke_to_ordered_pixels(stroke: List[Tuple[int,int]],
                     added.add((nx, ny))
     return ordered
 
-def play_pixels(pan, pixels, color, refresh_fn=None, per_pixel_delay=0.01, instant_threshold=1):
-    pixels = list(pixels)
-    if not pixels:
-        return
-    if len(pixels) <= instant_threshold:
-        for x, y in pixels:
-            pan.draw(x, y, color)
-        if refresh_fn:
-            refresh_fn()
-        return
+def play_pixels_invert(pan, pixels: Iterable[Tuple[int,int]], refresh_fn=None, per_pixel_delay:float=0.01):
     for x, y in pixels:
-        pan.draw(x, y, color)
+        try:
+            current = pan.get(x, y)
+            pan.draw(x, y, 1 - current)
+        except Exception:
+            pass
         if refresh_fn:
             refresh_fn()
         time.sleep(per_pixel_delay)
 
-def play_pixels_invert(pan, pixels: IterableType[Tuple[int,int]], refresh_fn=None, per_pixel_delay:float=0.01):
-    """Draw pixels by inverting current state."""
-    for x, y in pixels:
-        current = pan.get(x, y)
-        pan.draw(x, y, 1 - current)
-        if refresh_fn:
-            refresh_fn()
-        time.sleep(per_pixel_delay)
-
-def offset_stroke(stroke: IterableType[Tuple[int,int]], dx:int=0, dy:int=0):
+def offset_stroke(stroke: Iterable[Tuple[int,int]], dx:int=0, dy:int=0):
     return [(x + dx, y + dy) for (x, y) in stroke]
 
 # ---------------------------
-# Canonical paint utility
+# Digit stroke data (kept as you provided)
+# ---------------------------
+# (I preserved your stroke maps - truncated here for brevity in comments)
+digit_strokes = {
+    0: [[(2,11),(11,11)], [(11,11),(11,2)], [(11,2),(2,2)], [(2,2),(2,11)]],
+    1: [[(6,11),(7,11)], [(7,11),(7,2)]],
+    2: [[(2,11),(11,11)], [(11,11),(11,7)], [(11,7),(2,7)], [(2,7),(2,2)], [(2,2),(11,2)]],
+    3: [[(2,11),(11,11)], [(11,11),(11,2)], [(11,2),(2,2)], [(11,7),(4,7)]],
+    4: [[(2,11),(2,7)], [(2,7),(11,7)], [(11,11),(11,2)]],
+    5: [[(11,11),(2,11)], [(2,11),(2,7)], [(2,7),(11,7)], [(11,7),(11,2)], [(11,2),(2,2)]],
+    6: [[(11,11),(2,11)], [(2,11),(2,2)], [(2,2),(11,2)], [(11,2),(11,7)], [(11,7),(2,7)]],
+    7: [[(2,11),(11,11)], [(11,11),(11,2)]],
+    8: [[(2,11),(11,11)], [(11,11),(11,2)], [(11,2),(2,2)], [(2,2),(2,11)], [(2,7),(11,7)]],
+    9: [[(2,11),(11,11)], [(11,11),(11,2)], [(2,11),(2,7)], [(2,7),(11,7)]],
+}
+
+sequential_strokes = {
+    1: [[(2,11),(11,11)], [(11,10),(11,2)], [(10,2),(2,2)], [(2,3),(2,10)], [(6,11),(7,11)], [(7,10),(7,2)]],
+    2: [[(7,10),(7,2)], [(2,11),(5,11)], [(8,11),(11,11)], [(11,10),(11,7)], [(10,7),(2,7)], [(2,6),(2,2)], [(3,2),(11,2)]],
+    3: [[(2,3),(2,7)], [(3,7),(3,7)], [(11,3),(11,6)]],
+    4: [[(10,11),(2,11)], [(2,11),(2,7)], [(3,7),(3,7)], [(10,2),(2,2)]],
+    5: [[(2,2),(10,2)], [(11,8),(11,10)], [(10,11),(3,11)]],
+    6: [[(2,6),(2,3)]],
+    7: [[(2,10),(2,2)], [(3,2),(11,2)], [(11,3),(11,7)], [(10,7),(3,7)], [(11,10),(11,2)]],
+    8: [[(2,10),(2,2)], [(3,2),(10,2)], [(10,7),(3,7)]],
+    9: [[(2,6),(2,2)], [(3,2),(10,2)]],
+    0: [[(10,7),(3,7)], [(2,6),(2,2)], [(3,2),(10,2)]],
+}
+
+def flip_stroke_y(stroke: Iterable[Tuple[int,int]], size: int = DIGIT_SIZE):
+    return [(x, (size - 1) - y) for (x, y) in stroke]
+
+def flip_all(strokes_map):
+    return {d: [flip_stroke_y(s) for s in s_list] for d, s_list in strokes_map.items()}
+
+digit_strokes_flipped = flip_all(digit_strokes)
+sequential_strokes_flipped = flip_all(sequential_strokes)
+
+# ---------------------------
+# Hardware init
+# ---------------------------
+try:
+    panels = matrix.matrix(4)
+    rs232 = serial_port.initiate_serial()
+except Exception:
+    log.exception("Hardware init failed - running in degraded mode")
+    panels = None
+    rs232 = None
+
+DISPLAY_INVERTED = False
+
+# ---------------------------
+# Paint utilities (instant + sequential)
 # ---------------------------
 def paint_digit_instant(pan, strokes: List[List[Tuple[int,int]]], dx=0, dy=0, inverted=False,
                         thickness=STROKE_THICKNESS_DEFAULT, refresh_fn=None):
-    """Clear digit box and draw canonical strokes instantly."""
+    if pan is None:
+        return
     bg = 1 if not inverted else 0
     fg = 0 if not inverted else 1
-
     for yy in range(DIGIT_SIZE):
         for xx in range(DIGIT_SIZE):
             pan.draw(dx + xx, dy + yy, bg)
-
     for s in strokes:
         off = offset_stroke(s, dx, dy)
         pxs = stroke_to_ordered_pixels(off, thickness=thickness, bounds=(WIDTH, HEIGHT))
         for tx, ty in pxs:
             if 0 <= tx < WIDTH and 0 <= ty < HEIGHT:
                 pan.draw(tx, ty, fg)
-
     if refresh_fn:
         refresh_fn()
 
-# ---------------------------
-# Proper sequential transition:
-# ---------------------------
 def sequential_transition(pan, from_digit:int, to_digit:int, dx:int, dy:int,
                           refresh_fn=refresh,
                           per_pixel_delay:float=0.01,
@@ -352,48 +316,39 @@ def sequential_transition(pan, from_digit:int, to_digit:int, dx:int, dy:int,
                           bounds=(WIDTH, HEIGHT),
                           inverted:bool=False,
                           animate_if_same:bool=False):
+    if pan is None:
+        return
     if from_digit == to_digit and not animate_if_same:
         return
-
     seq = sequential_strokes_flipped.get(to_digit, digit_strokes_flipped.get(to_digit, []))
     for stroke in seq:
         off = offset_stroke(stroke, dx, dy)
         pixels = stroke_to_ordered_pixels(off, thickness=thickness, bounds=bounds)
-        # sequential strokes should invert the visual state (we want reveal/morph)
         play_pixels_invert(pan, pixels, refresh_fn=refresh_fn, per_pixel_delay=per_pixel_delay)
-    # final snap to canonical digit for pixel-perfect result
+    # final snap to canonical digit
     time.sleep(per_pixel_delay)
     paint_digit_instant(pan, digit_strokes_flipped[to_digit], dx=dx, dy=dy, inverted=inverted, thickness=thickness, refresh_fn=refresh_fn)
 
-# ---------------------------
-# Display helpers
-# ---------------------------
 def draw_hours_only(h:int, inverted:bool):
+    if panels is None:
+        return
     d1, d2 = divmod(h, 10)
     paint_digit_instant(panels, digit_strokes_flipped[d1], dx=0, dy=0, inverted=inverted, refresh_fn=refresh)
     paint_digit_instant(panels, digit_strokes_flipped[d2], dx=DIGIT_SIZE, dy=0, inverted=inverted, refresh_fn=refresh)
 
 def draw_hours_and_bottom(h:int, bottom_val:int, inverted:bool):
+    if panels is None:
+        return
     d1, d2 = divmod(h, 10)
     b1, b2 = divmod(bottom_val, 10)
-    paint_digit_instant(panels, digit_strokes_flipped[d1], dx=0, dy=0, inverted=inverted)
-    paint_digit_instant(panels, digit_strokes_flipped[d2], dx=DIGIT_SIZE, dy=0, inverted=inverted)
-    paint_digit_instant(panels, digit_strokes_flipped[b1], dx=0, dy=DIGIT_SIZE, inverted=inverted)
-    paint_digit_instant(panels, digit_strokes_flipped[b2], dx=DIGIT_SIZE, dy=DIGIT_SIZE, inverted=inverted)
-    refresh()
-
-def random_invert_animation(pan, refresh_fn, delay=0.01, width=WIDTH, height=HEIGHT):
-    current = capture_screen(pan, width, height)
-    target = 1 - current
-    coords = [(x, y) for y in range(height) for x in range(width)]
-    random.shuffle(coords)
-    for x, y in coords:
-        pan.draw(x, y, int(target[y, x]))
-        if refresh_fn:
-            refresh_fn()
-        time.sleep(delay)
+    paint_digit_instant(panels, digit_strokes_flipped[d1], dx=0, dy=0, inverted=inverted, refresh_fn=refresh)
+    paint_digit_instant(panels, digit_strokes_flipped[d2], dx=DIGIT_SIZE, dy=0, inverted=inverted, refresh_fn=refresh)
+    paint_digit_instant(panels, digit_strokes_flipped[b1], dx=0, dy=DIGIT_SIZE, inverted=inverted, refresh_fn=refresh)
+    paint_digit_instant(panels, digit_strokes_flipped[b2], dx=DIGIT_SIZE, dy=DIGIT_SIZE, inverted=inverted, refresh_fn=refresh)
 
 def clear_display(pan, inverted=False, refresh_fn=refresh):
+    if pan is None:
+        return
     bg = 1 if not inverted else 0
     for y in range(HEIGHT):
         for x in range(WIDTH):
@@ -402,14 +357,13 @@ def clear_display(pan, inverted=False, refresh_fn=refresh):
         refresh_fn()
 
 # ---------------------------
-# Random hour reveal helpers
+# Random reveal utilities
 # ---------------------------
 def render_digits_to_buffer(hour:int, bottom_val:int=None, inverted:bool=False):
     buf = np.zeros((HEIGHT, WIDTH), dtype=int)
     bg = 1 if not inverted else 0
     fg = 0 if not inverted else 1
     buf[:, :] = bg
-
     def draw_digit_to_buf(digit, dx, dy):
         strokes = digit_strokes_flipped.get(digit, [])
         for s in strokes:
@@ -418,7 +372,6 @@ def render_digits_to_buffer(hour:int, bottom_val:int=None, inverted:bool=False):
             for x, y in pxs:
                 if 0 <= x < WIDTH and 0 <= y < HEIGHT:
                     buf[y, x] = fg
-
     d1, d2 = divmod(hour, 10)
     draw_digit_to_buf(d1, 0, 0)
     draw_digit_to_buf(d2, DIGIT_SIZE, 0)
@@ -439,74 +392,10 @@ def random_reveal_buffer(pan, refresh_fn, target_buf, delay=0.01):
         time.sleep(delay)
 
 # ---------------------------
-# MQTT callbacks & startup
-# ---------------------------
-def mqtt_on_connect(client, userdata, flags, rc, properties=None):
-    log.info("MQTT connected rc=%s flags=%s", rc, flags)
-    if rc == 0:
-        client.publish("dotty/status", "online", qos=1, retain=True)
-        client.subscribe("dotty/command")
-    else:
-        log.warning("MQTT connect failed rc=%s", rc)
-
-def mqtt_on_message(client, userdata, msg):
-    payload = msg.payload.decode(errors="ignore").strip()
-    log.info("MQTT RX %s -> %s", msg.topic, payload)
-    if payload:
-        command_queue.put(payload)
-
-def mqtt_on_disconnect(client, userdata, rc):
-    log.warning("MQTT disconnected rc=%s", rc)
-
-# create mqtt client (single instance)
-mqtt_client = mqtt.Client(client_id=f"dotty-{os.uname().nodename}-{random.getrandbits(32):08x}", protocol=mqtt.MQTTv311)
-if MQTT_USER:
-    mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
-
-mqtt_client.on_connect = mqtt_on_connect
-mqtt_client.on_message = mqtt_on_message
-mqtt_client.on_disconnect = mqtt_on_disconnect
-
-def start_mqtt_background():
-    backoff = 1.0
-    while True:
-        try:
-            log.info("Attempting mqtt connect to %s:%s", MQTT_BROKER, MQTT_PORT)
-            mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
-            mqtt_client.loop_start()
-            log.info("MQTT loop started")
-            return
-        except Exception as e:
-            log.exception("MQTT start failed: %s — retrying in %s sec", e, backoff)
-            time.sleep(backoff)
-            backoff = min(backoff * 2.0, 60.0)
-
-# start MQTT in background thread so main loop isn't blocked
-threading.Thread(target=start_mqtt_background, daemon=True).start()
-
-# ensure mqtt thread can't prevent process exit and publish heartbeat
-def heartbeat_task():
-    while True:
-        try:
-            mqtt_client.publish("dotty/heartbeat", "alive", qos=0, retain=False)
-        except Exception:
-            pass
-        time.sleep(30)
-
-# start mqtt background connect thread (daemon)
-t = threading.Thread(target=start_mqtt_background, daemon=True)
-t.start()
-
-# start lightweight heartbeat so we can watch activity (daemon)
-hb = threading.Thread(target=heartbeat_task, daemon=True)
-hb.start()
-
-# ---------------------------
 # Main loop
 # ---------------------------
 def main():
     global DISPLAY_INVERTED
-
     last_min = -1
     last_hour = -1
     prev_show_seconds = False
@@ -516,149 +405,131 @@ def main():
     h, m, s = get_time()
     draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
 
+    log.info("Entering main loop")
     while True:
-        h, m, _ = get_time()
-        show_seconds = os.path.exists(SHOW_SECONDS_FILE)
+        try:
+            h, m, _ = get_time()
+            show_seconds = os.path.exists(SHOW_SECONDS_FILE)
 
-        minute_delay = read_delay(SNAKE_DELAY_FILE, SNAKE_DELAY_DEFAULT)
-        second_delay = read_delay(SEC_SNAKE_DELAY_FILE, SEC_SNAKE_DELAY_DEFAULT)
-        instant_threshold = INSTANT_THRESHOLD_DEFAULT
-        thickness = STROKE_THICKNESS_DEFAULT
+            minute_delay = read_delay(SNAKE_DELAY_FILE, SNAKE_DELAY_DEFAULT)
+            second_delay = read_delay(SEC_SNAKE_DELAY_FILE, SEC_SNAKE_DELAY_DEFAULT)
+            instant_threshold = INSTANT_THRESHOLD_DEFAULT
+            thickness = STROKE_THICKNESS_DEFAULT
 
-        # ---- handle inbound MQTT commands (if any) ----
-        while not command_queue.empty():
-            try:
-                cmd = command_queue.get_nowait()
-            except queue.Empty:
-                break
-            cmd = cmd.lower().strip()
-            if cmd == "blank":
-                log.info("MQTT command: blank -> clearing display")
-                clear_display(panels, inverted=DISPLAY_INVERTED, refresh_fn=refresh)
-            elif cmd == "refresh":
-                log.info("MQTT command: refresh -> redrawing time")
-                h, m, s = get_time()
+            # --- handle commands from MQTT (non-blocking) ---
+            while not command_queue.empty():
+                try:
+                    cmd = command_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if not cmd:
+                    continue
+                cmd_norm = cmd.strip().lower()
+                log.info("Processing command from queue: %s", cmd_norm)
+                if cmd_norm == "blank":
+                    clear_display(panels, inverted=DISPLAY_INVERTED, refresh_fn=refresh)
+                elif cmd_norm == "refresh":
+                    hh, mm, ss = get_time()
+                    draw_hours_and_bottom(hh, mm, DISPLAY_INVERTED)
+                else:
+                    log.info("Unknown command: %s", cmd)
+
+            # seconds simulated step-through mode
+            if show_seconds:
+                if not prev_show_seconds:
+                    sec_sim = 0
+                    draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
+                    prev_show_seconds = True
+                    time.sleep(0.05)
+                    continue
+                while os.path.exists(SHOW_SECONDS_FILE):
+                    old_s = sec_sim
+                    sec_sim = (sec_sim + 1) % 60
+                    new_s = sec_sim
+                    old_tens, old_ones = divmod(old_s, 10)
+                    new_tens, new_ones = divmod(new_s, 10)
+                    if new_tens != old_tens:
+                        sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
+                                              refresh_fn=refresh, per_pixel_delay=second_delay,
+                                              thickness=thickness, instant_threshold=instant_threshold,
+                                              bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
+                    if new_ones != old_ones:
+                        sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
+                                              refresh_fn=refresh, per_pixel_delay=second_delay,
+                                              thickness=thickness, instant_threshold=instant_threshold,
+                                              bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
+                    time.sleep(1.0)
+                prev_show_seconds = False
+                h, m, _ = get_time()
                 draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
-            else:
-                log.info("MQTT command: unknown -> %s", cmd)
-
-        # ----------------------------
-        # SECONDS DEBUG MODE (simulated step-through)
-        # ----------------------------
-        if show_seconds:
-            if not prev_show_seconds:
-                sec_sim = 0
-                draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
-                prev_show_seconds = True
-                time.sleep(0.05)
                 continue
 
-            while os.path.exists(SHOW_SECONDS_FILE):
-                old_s = sec_sim
-                sec_sim = (sec_sim + 1) % 60
-                new_s = sec_sim
-
-                old_tens, old_ones = divmod(old_s, 10)
-                new_tens, new_ones = divmod(new_s, 10)
-
-                if new_tens != old_tens:
-                    sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
-                                          refresh_fn=refresh, per_pixel_delay=second_delay,
-                                          thickness=thickness, instant_threshold=instant_threshold,
-                                          bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-
-                if new_ones != old_ones:
-                    sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
-                                          refresh_fn=refresh, per_pixel_delay=second_delay,
-                                          thickness=thickness, instant_threshold=instant_threshold,
-                                          bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-
-                # allow invert trigger while in seconds mode
-                if os.path.exists(TRIGGER_INVERT_FILE):
-                    random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
-                    DISPLAY_INVERTED = not DISPLAY_INVERTED
-                    draw_hours_and_bottom(h, sec_sim, DISPLAY_INVERTED)
-                    try:
-                        os.remove(TRIGGER_INVERT_FILE)
-                    except Exception:
-                        pass
-
-                time.sleep(1.0)
-
-            prev_show_seconds = False
-            h, m, _ = get_time()
-            draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
-            continue
-
-        # ----------------------------
-        # NORMAL minute mode transitions
-        # ----------------------------
-        if m != last_min:
-            old_m = last_min if last_min >= 0 else m
-            old_tens, old_ones = divmod(old_m, 10)
-            new_tens, new_ones = divmod(m, 10)
-
-            # top-of-hour: random reveal showing next hour
-            if m == 0:
-                # next hour is already reflected by get_time()
-                reveal_hour = h
-                new_inverted = not DISPLAY_INVERTED
-                target = render_digits_to_buffer(reveal_hour, bottom_val=0, inverted=new_inverted)
-                random_reveal_buffer(panels, refresh, target, delay=0.005)
-
-                DISPLAY_INVERTED = new_inverted
-                draw_hours_only(reveal_hour, DISPLAY_INVERTED)
-                paint_digit_instant(panels, digit_strokes_flipped[0], dx=0, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
-                paint_digit_instant(panels, digit_strokes_flipped[0], dx=DIGIT_SIZE, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED)
-                last_hour = reveal_hour
-
-                # re-read to avoid race with long reveal
-                h, m, _ = get_time()
+            # minute mode transitions (including top-of-hour reveal)
+            if m != last_min:
                 old_m = last_min if last_min >= 0 else m
                 old_tens, old_ones = divmod(old_m, 10)
                 new_tens, new_ones = divmod(m, 10)
 
-            # bottom-left (tens)
-            sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
-                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
-                                  thickness=thickness, instant_threshold=instant_threshold,
-                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
+                # top-of-hour handling
+                if m == 0:
+                    reveal_hour = h  # get_time already rolled hour over
+                    new_inverted = not DISPLAY_INVERTED
+                    target = render_digits_to_buffer(reveal_hour, bottom_val=0, inverted=new_inverted)
+                    random_reveal_buffer(panels, refresh, target, delay=0.005)
+                    DISPLAY_INVERTED = new_inverted
+                    draw_hours_only(reveal_hour, DISPLAY_INVERTED)
+                    paint_digit_instant(panels, digit_strokes_flipped[0], dx=0, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED, refresh_fn=refresh)
+                    paint_digit_instant(panels, digit_strokes_flipped[0], dx=DIGIT_SIZE, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED, refresh_fn=refresh)
+                    last_hour = reveal_hour
+                    # re-read minute in case time advanced during reveal
+                    h, m, _ = get_time()
+                    old_m = last_min if last_min >= 0 else m
+                    old_tens, old_ones = divmod(old_m, 10)
+                    new_tens, new_ones = divmod(m, 10)
 
-            # bottom-right (ones)
-            sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
-                                  refresh_fn=refresh, per_pixel_delay=minute_delay,
-                                  thickness=thickness, instant_threshold=instant_threshold,
-                                  bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
+                # run minute-digit transitions
+                sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
+                                      refresh_fn=refresh, per_pixel_delay=minute_delay,
+                                      thickness=thickness, instant_threshold=instant_threshold,
+                                      bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
 
-            last_min = m
+                sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
+                                      refresh_fn=refresh, per_pixel_delay=minute_delay,
+                                      thickness=thickness, instant_threshold=instant_threshold,
+                                      bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
 
-            if h != last_hour:
-                # keep last_hour in sync to avoid duplicate reveals
-                draw_hours_only(h, DISPLAY_INVERTED)
-                last_hour = h
+                last_min = m
 
-        # ----------------------------
-        # SSH invert trigger (normal mode)
-        # ----------------------------
-        if os.path.exists(TRIGGER_INVERT_FILE):
-            random_invert_animation(panels, refresh, delay=0.01, width=WIDTH, height=HEIGHT)
-            DISPLAY_INVERTED = not DISPLAY_INVERTED
-            draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
-            try:
-                os.remove(TRIGGER_INVERT_FILE)
-            except Exception:
-                pass
+                # if hour changed unexpectedly, ensure top half is correct
+                if h != last_hour:
+                    draw_hours_only(h, DISPLAY_INVERTED)
+                    last_hour = h
 
-        time.sleep(0.1)
+            # SSH invert trigger (manual file)
+            if os.path.exists(TRIGGER_INVERT_FILE):
+                random_invert = read_delay(SNAKE_DELAY_FILE, SNAKE_DELAY_DEFAULT)
+                random_reveal_buffer = None  # nothing; reuse random_invert_animation if you want
+                # simple invert animation
+                current = capture_screen(panels)
+                target = 1 - current
+                coords = [(x, y) for y in range(HEIGHT) for x in range(WIDTH)]
+                random.shuffle(coords)
+                for x, y in coords:
+                    panels.draw(x, y, int(target[y, x]))
+                    refresh()
+                    time.sleep(0.01)
+                DISPLAY_INVERTED = not DISPLAY_INVERTED
+                draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
+                try:
+                    os.remove(TRIGGER_INVERT_FILE)
+                except Exception:
+                    pass
+
+            time.sleep(0.1)
+
+        except Exception:
+            log.exception("Unhandled exception in main loop; sleeping briefly and continuing")
+            time.sleep(1.0)
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        log.info("Dotty stopped by user")
-    finally:
-        try:
-            mqtt_client.publish("dotty/status", "offline", qos=1, retain=True)
-            mqtt_client.loop_stop()
-        except Exception:
-            pass
+    main()
