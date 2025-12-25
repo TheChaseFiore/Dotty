@@ -139,6 +139,24 @@ else:
 # ---------------------------
 # Utilities / hardware wrappers
 # ---------------------------
+class ShadowMatrix:
+    def __init__(self, real_panels, width, height):
+        self.real = real_panels
+        self.w = width
+        self.h = height
+        # Keep state in memory for O(1) reads
+        self.buffer = np.zeros((height, width), dtype=int)
+
+    def draw(self, x, y, val):
+        if 0 <= x < self.w and 0 <= y < self.h:
+            self.buffer[y, x] = int(val)
+            self.real.draw(x, y, int(val))
+
+    def get(self, x, y):
+        if 0 <= x < self.w and 0 <= y < self.h:
+            return self.buffer[y, x]
+        return 0
+        
 def refresh(flaggs=True):
     try:
         serial_port.refresh(panels, rs232, flaggs)
@@ -282,13 +300,19 @@ sequential_strokes_flipped = flip_all(sequential_strokes)
 # ---------------------------
 # Hardware init
 # ---------------------------
+# existing hardware init
 try:
     panels = matrix.matrix(4)
     rs232 = serial_port.initiate_serial()
-except Exception:
+except:
     log.exception("Hardware init failed - running in degraded mode")
     panels = None
     rs232 = None
+
+# WRAP IT HERE:
+if panels:
+    panels = ShadowMatrix(panels, WIDTH, HEIGHT)
+    
 
 DISPLAY_INVERTED = False
 
