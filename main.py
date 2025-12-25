@@ -401,13 +401,17 @@ def random_reveal_buffer(pan, refresh_fn, target_buf, delay=0.01):
 # ---------------------------
 def main():
     global DISPLAY_INVERTED
-    last_min = -1
-    last_hour = -1
+    
+    # Initialize state with current time to prevent 
+    # animations from triggering immediately on boot/restart.
+    h, m, s = get_time()
+    last_min = m
+    last_hour = h
+    
     prev_show_seconds = False
     sec_sim = 0
 
-    # initial draw
-    h, m, s = get_time()
+    # Initial draw (Instant)
     draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
 
     log.info("Entering main loop")
@@ -469,52 +473,65 @@ def main():
                 draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
                 continue
 
-            # minute mode transitions (including top-of-hour reveal)
+            # ==========================================
+            # PRIORITY 1: Top of Hour Transition
+            # ==========================================
+            if h != last_hour:
+                log.info("Top of Hour Triggered: %02d:00", h)
+                
+                # 1. Prepare the Invert State
+                new_inverted = not DISPLAY_INVERTED
+                
+                # 2. Render the "After" image (New Hour + "00" minutes)
+                # Note: We use 'h' because get_time() has already rolled over
+                target = render_digits_to_buffer(h, bottom_val=0, inverted=new_inverted)
+                
+                # 3. Perform the Sparkle/Reveal Animation
+                random_reveal_buffer(panels, refresh, target, delay=0.005)
+                
+                # 4. Commit State
+                DISPLAY_INVERTED = new_inverted
+                last_hour = h
+                last_min = m  # Sync minutes so we don't trigger the snake animation below
+                
+                # 5. Safety Redraw (snaps to perfect lines in case reveal left artifacts)
+                draw_hours_and_bottom(h, 0, DISPLAY_INVERTED)
+                
+                continue # SKIP the rest of the loop to prevent conflicts
+
+            # ==========================================
+            # PRIORITY 2: Standard Minute Transition
+            # ==========================================
             if m != last_min:
-                old_m = last_min if last_min >= 0 else m
+                log.info("Minute Transition: %02d -> %02d", last_min, m)
+                
+                old_m = last_min
                 old_tens, old_ones = divmod(old_m, 10)
                 new_tens, new_ones = divmod(m, 10)
 
-                # top-of-hour handling
-                if m == 0:
-                    reveal_hour = h  # get_time already rolled hour over
-                    new_inverted = not DISPLAY_INVERTED
-                    target = render_digits_to_buffer(reveal_hour, bottom_val=0, inverted=new_inverted)
-                    random_reveal_buffer(panels, refresh, target, delay=0.005)
-                    DISPLAY_INVERTED = new_inverted
-                    draw_hours_only(reveal_hour, DISPLAY_INVERTED)
-                    paint_digit_instant(panels, digit_strokes_flipped[0], dx=0, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED, refresh_fn=refresh)
-                    paint_digit_instant(panels, digit_strokes_flipped[0], dx=DIGIT_SIZE, dy=DIGIT_SIZE, inverted=DISPLAY_INVERTED, refresh_fn=refresh)
-                    last_hour = reveal_hour
-                    # re-read minute in case time advanced during reveal
-                    h, m, _ = get_time()
-                    old_m = last_min if last_min >= 0 else m
-                    old_tens, old_ones = divmod(old_m, 10)
-                    new_tens, new_ones = divmod(m, 10)
+                # Tens digit (only if changed)
+                if old_tens != new_tens:
+                    sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
+                                          refresh_fn=refresh, per_pixel_delay=minute_delay,
+                                          thickness=thickness, instant_threshold=instant_threshold,
+                                          bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
 
-                # run minute-digit transitions
-                sequential_transition(panels, old_tens, new_tens, dx=0, dy=DIGIT_SIZE,
-                                      refresh_fn=refresh, per_pixel_delay=minute_delay,
-                                      thickness=thickness, instant_threshold=instant_threshold,
-                                      bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
-
+                # Ones digit (always changes on minute change)
                 sequential_transition(panels, old_ones, new_ones, dx=DIGIT_SIZE, dy=DIGIT_SIZE,
                                       refresh_fn=refresh, per_pixel_delay=minute_delay,
                                       thickness=thickness, instant_threshold=instant_threshold,
                                       bounds=(WIDTH, HEIGHT), inverted=DISPLAY_INVERTED)
 
                 last_min = m
-
-                # if hour changed unexpectedly, ensure top half is correct
+                
+                # Check if hours drifted (unlikely, but keeps display strict)
                 if h != last_hour:
                     draw_hours_only(h, DISPLAY_INVERTED)
                     last_hour = h
 
             # SSH invert trigger (manual file)
             if os.path.exists(TRIGGER_INVERT_FILE):
-                random_invert = read_delay(SNAKE_DELAY_FILE, SNAKE_DELAY_DEFAULT)
-                random_reveal_buffer = None  # nothing; reuse random_invert_animation if you want
-                # simple invert animation
+                # ... existing manual trigger logic ...
                 current = capture_screen(panels)
                 target = 1 - current
                 coords = [(x, y) for y in range(HEIGHT) for x in range(WIDTH)]
