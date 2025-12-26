@@ -159,7 +159,9 @@ class ShadowMatrix:
         
 def refresh(flaggs=True):
     try:
-        serial_port.refresh(panels, rs232, flaggs)
+        # FIX: If we are using ShadowMatrix, unwrap it to get the real hardware object
+        target = panels.real if hasattr(panels, "real") else panels
+        serial_port.refresh(target, rs232, flaggs)
     except Exception:
         log.exception("refresh() failed")
 
