@@ -90,6 +90,16 @@ def _mqtt_on_message(client, userdata, msg):
 def _mqtt_on_disconnect(client, userdata, rc):
     log.warning("MQTT disconnected rc=%s", rc)
 
+def publish_state(state: str):
+    """Publish dotty/state retained so HA can wait_for_trigger on display state."""
+    if mqtt_client is None:
+        return
+    try:
+        mqtt_client.publish("dotty/state", state, qos=1, retain=True)
+        log.info("Published dotty/state=%s", state)
+    except Exception:
+        log.exception("publish_state(%s) failed", state)
+
 # ---------------------------
 # MQTT client management (single instance)
 # ---------------------------
@@ -439,6 +449,7 @@ def main():
 
     # Initial draw (Instant)
     draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
+    publish_state("time")
 
     log.info("Entering main loop")
     while True:
@@ -463,9 +474,11 @@ def main():
                 log.info("Processing command from queue: %s", cmd_norm)
                 if cmd_norm == "blank":
                     clear_display(panels, inverted=DISPLAY_INVERTED, refresh_fn=refresh)
+                    publish_state("blank")
                 elif cmd_norm == "refresh":
                     hh, mm, ss = get_time()
                     draw_hours_and_bottom(hh, mm, DISPLAY_INVERTED)
+                    publish_state("time")
                 else:
                     log.info("Unknown command: %s", cmd)
 
