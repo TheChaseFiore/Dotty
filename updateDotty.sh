@@ -54,6 +54,17 @@ if [ -d "$REPO_DIR/.git" ]; then
     echo "[*] repo exists at $REPO_DIR — updating"
     cd "$REPO_DIR" || { echo "[ERR] cd $REPO_DIR failed"; exit 1; }
 
+    # Back up local-only *.env files before fetch+reset, in case any of them
+    # were tracked-then-deleted upstream (git reset --hard would otherwise
+    # remove them from the working tree).
+    ENV_BACKUP_DIR=$(mktemp -d -t dotty-env-XXXXXX)
+    echo "[*] backing up local *.env files to $ENV_BACKUP_DIR"
+    for envfile in "$REPO_DIR"/*.env; do
+        if [ -e "$envfile" ]; then
+            cp -p "$envfile" "$ENV_BACKUP_DIR/" && echo "    backed up $(basename "$envfile")"
+        fi
+    done
+
     # ensure remote exists
     if ! git remote get-url origin >/dev/null 2>&1; then
         echo "[*] adding origin $REPO_URL"
@@ -78,6 +89,18 @@ if [ -d "$REPO_DIR/.git" ]; then
     if ! git reset --hard "origin/$DEFAULT_BRANCH"; then
         echo "[WARN] git reset --hard origin/$DEFAULT_BRANCH failed"
     fi
+
+    # Restore any *.env files that the reset removed.
+    echo "[*] restoring local *.env files if missing"
+    for backup in "$ENV_BACKUP_DIR"/*.env; do
+        if [ -e "$backup" ]; then
+            name=$(basename "$backup")
+            if [ ! -f "$REPO_DIR/$name" ]; then
+                cp -p "$backup" "$REPO_DIR/$name" && echo "    restored $name"
+            fi
+        fi
+    done
+    rm -rf "$ENV_BACKUP_DIR"
 
     echo "[*] repo recent commits:"
     git --no-pager log -n 5 --pretty=format:'  %h %ad %s <%an>' --date=short || true
