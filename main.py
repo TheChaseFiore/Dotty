@@ -115,6 +115,8 @@ def build_mqtt_client():
     client = mqtt.Client(client_id=client_id, protocol=mqtt.MQTTv311)
     if MQTT_USER:
         client.username_pw_set(MQTT_USER, MQTT_PASS)
+    # LWT: broker publishes offline if dotty drops the connection ungracefully
+    client.will_set("dotty/status", "offline", qos=1, retain=True)
     client.on_connect = _mqtt_on_connect
     client.on_message = _mqtt_on_message
     client.on_disconnect = _mqtt_on_disconnect
