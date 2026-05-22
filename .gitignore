@@ -14,6 +14,9 @@
 .env
 *.env
 
+# Baked playback clips are generated locally by tools/make_netflix_clip.py
+assets/*.npz
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 

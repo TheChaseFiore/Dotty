@@ -492,6 +492,47 @@ def display_netflix_logo(pan, refresh_fn=refresh, step_delay: float = 0.03):
     for y in range(bottom, top - 1, -1):
         light_row(y, rx)
 
+# Baked clip produced by tools/make_netflix_clip.py (white-on-black 1-bit frames).
+NETFLIX_CLIP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "netflix.npz")
+
+def load_clip(path):
+    """Load a baked 1-bit clip. Returns (frames(n,H,W) uint8, fps) or None."""
+    if not os.path.exists(path):
+        return None
+    try:
+        data = np.load(path)
+        shape = tuple(int(v) for v in data["shape"])
+        n = int(np.prod(shape))
+        frames = np.unpackbits(data["frames"])[:n].reshape(shape).astype(np.uint8)
+        fps = float(data["fps"]) if "fps" in data.files else 12.0
+        return frames, fps
+    except Exception:
+        log.exception("Failed to load clip %s", path)
+        return None
+
+def play_clip(pan, frames, fps, refresh_fn=refresh):
+    """Play baked frames, pushing only changed pixels so the slow flip-dot bus
+    redraws just the panels that actually changed between frames."""
+    if pan is None or len(frames) == 0:
+        return
+    delay = 1.0 / fps if fps > 0 else 0.08
+    prev = None
+    for fr in frames:
+        fh, fw = fr.shape
+        if prev is None:
+            for y in range(min(fh, HEIGHT)):
+                for x in range(min(fw, WIDTH)):
+                    pan.draw(x, y, int(fr[y, x]))
+        else:
+            ys, xs = np.where(fr != prev)
+            for y, x in zip(ys, xs):
+                if 0 <= x < WIDTH and 0 <= y < HEIGHT:
+                    pan.draw(int(x), int(y), int(fr[y, x]))
+        if refresh_fn:
+            refresh_fn()
+        prev = fr
+        time.sleep(delay)
+
 # ---------------------------
 # Main loop
 # ---------------------------
@@ -540,7 +581,13 @@ def main():
                     draw_hours_and_bottom(hh, mm, DISPLAY_INVERTED)
                     publish_state("time")
                 elif cmd_norm == "netflix":
-                    display_netflix_logo(panels, refresh_fn=refresh)
+                    clip = load_clip(NETFLIX_CLIP_PATH)
+                    if clip is not None:
+                        frames, fps = clip
+                        play_clip(panels, frames, fps, refresh_fn=refresh)
+                    else:
+                        log.info("No baked clip at %s; using drawn animation", NETFLIX_CLIP_PATH)
+                        display_netflix_logo(panels, refresh_fn=refresh)
                     publish_state("netflix")
                 else:
                     log.info("Unknown command: %s", cmd)

@@ -1,0 +1,6 @@
+# Deps for the one-time clip baker (tools/make_netflix_clip.py).
+# Not needed at runtime -- main.py plays baked clips with numpy only.
+# Also requires ffmpeg installed on the system (apt install ffmpeg).
+yt-dlp>=2024.1.0
+opencv-python-headless>=4.5
+numpy>=1.21
