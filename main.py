@@ -435,6 +435,64 @@ def random_reveal_buffer(pan, refresh_fn, target_buf, delay=0.01):
         time.sleep(delay)
 
 # ---------------------------
+# Netflix splash logo
+# ---------------------------
+# Geometry of the Netflix 'N' on the 28x28 grid (white/lit on a black field).
+NETFLIX_TOP = 3
+NETFLIX_BOTTOM = 24          # vertical extent of the legs (inclusive)
+NETFLIX_BAR_W = 3
+NETFLIX_LEFT_X0 = 6          # left leg starts here
+NETFLIX_RIGHT_X0 = WIDTH - NETFLIX_BAR_W - NETFLIX_LEFT_X0  # symmetric right leg -> 19
+
+def netflix_logo_buffer():
+    """Final 28x28 frame of the Netflix 'N': lit (white) strokes on a dark field."""
+    buf = np.zeros((HEIGHT, WIDTH), dtype=int)
+    top, bottom, bar_w = NETFLIX_TOP, NETFLIX_BOTTOM, NETFLIX_BAR_W
+    lx, rx = NETFLIX_LEFT_X0, NETFLIX_RIGHT_X0
+    buf[top:bottom + 1, lx:lx + bar_w] = 1
+    buf[top:bottom + 1, rx:rx + bar_w] = 1
+    span = bottom - top
+    for i, y in enumerate(range(top, bottom + 1)):
+        x0 = int(round(lx + (rx - lx) * (i / span)))
+        buf[y, x0:x0 + bar_w] = 1
+    return buf
+
+def display_netflix_logo(pan, refresh_fn=refresh, step_delay: float = 0.03):
+    """Animate the Netflix 'N' onto the display like the title-sequence ident:
+    starting from black, light sweeps up the left leg, down the diagonal, then up
+    the right leg. White (lit) strokes on a black (dark) field."""
+    if pan is None:
+        return
+    top, bottom, bar_w = NETFLIX_TOP, NETFLIX_BOTTOM, NETFLIX_BAR_W
+    lx, rx = NETFLIX_LEFT_X0, NETFLIX_RIGHT_X0
+    span = bottom - top
+
+    # Start from a clean black field.
+    for y in range(HEIGHT):
+        for x in range(WIDTH):
+            pan.draw(x, y, 0)
+    if refresh_fn:
+        refresh_fn()
+
+    def light_row(y, x0):
+        for x in range(x0, x0 + bar_w):
+            pan.draw(x, y, 1)
+        if refresh_fn:
+            refresh_fn()
+        time.sleep(step_delay)
+
+    # 1) left leg rises (bottom -> top)
+    for y in range(bottom, top - 1, -1):
+        light_row(y, lx)
+    # 2) diagonal sweeps (top -> bottom)
+    for i, y in enumerate(range(top, bottom + 1)):
+        x0 = int(round(lx + (rx - lx) * (i / span)))
+        light_row(y, x0)
+    # 3) right leg rises (bottom -> top)
+    for y in range(bottom, top - 1, -1):
+        light_row(y, rx)
+
+# ---------------------------
 # Main loop
 # ---------------------------
 def main():
@@ -481,6 +539,9 @@ def main():
                     hh, mm, ss = get_time()
                     draw_hours_and_bottom(hh, mm, DISPLAY_INVERTED)
                     publish_state("time")
+                elif cmd_norm == "netflix":
+                    display_netflix_logo(panels, refresh_fn=refresh)
+                    publish_state("netflix")
                 else:
                     log.info("Unknown command: %s", cmd)
 
