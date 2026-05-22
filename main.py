@@ -435,6 +435,41 @@ def random_reveal_buffer(pan, refresh_fn, target_buf, delay=0.01):
         time.sleep(delay)
 
 # ---------------------------
+# Netflix splash logo
+# ---------------------------
+def netflix_logo_buffer(inverted: bool = False):
+    """Build a 28x28 buffer of the Netflix 'N' ribbon mark.
+
+    Splash polarity: the N is lit on a dark field. The `inverted` flag swaps
+    the two so the splash still reads on a night-mode (inverted) display.
+    """
+    on = 0 if inverted else 1
+    off = 1 if inverted else 0
+    buf = np.full((HEIGHT, WIDTH), off, dtype=int)
+
+    top, bottom = 3, 24          # vertical extent (inclusive)
+    bar_w = 3
+    left_x0 = 6                  # left vertical bar starts here
+    right_x0 = WIDTH - bar_w - left_x0  # symmetric right bar -> 19
+
+    # left and right vertical legs
+    buf[top:bottom + 1, left_x0:left_x0 + bar_w] = on
+    buf[top:bottom + 1, right_x0:right_x0 + bar_w] = on
+
+    # diagonal leg sweeping from the top of the left bar to the bottom of the right bar
+    span = bottom - top
+    for i, y in enumerate(range(top, bottom + 1)):
+        x0 = int(round(left_x0 + (right_x0 - left_x0) * (i / span)))
+        buf[y, x0:x0 + bar_w] = on
+    return buf
+
+def display_netflix_logo(pan, inverted: bool = False, refresh_fn=refresh):
+    if pan is None:
+        return
+    buf = netflix_logo_buffer(inverted=inverted)
+    random_reveal_buffer(pan, refresh_fn, buf, delay=0.005)
+
+# ---------------------------
 # Main loop
 # ---------------------------
 def main():
@@ -481,6 +516,9 @@ def main():
                     hh, mm, ss = get_time()
                     draw_hours_and_bottom(hh, mm, DISPLAY_INVERTED)
                     publish_state("time")
+                elif cmd_norm == "netflix":
+                    display_netflix_logo(panels, inverted=DISPLAY_INVERTED, refresh_fn=refresh)
+                    publish_state("netflix")
                 else:
                     log.info("Unknown command: %s", cmd)
 
