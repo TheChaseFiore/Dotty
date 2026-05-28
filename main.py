@@ -494,6 +494,9 @@ def display_netflix_logo(pan, refresh_fn=refresh, step_delay: float = 0.03):
 
 # Baked clip produced by tools/make_netflix_clip.py (white-on-black 1-bit frames).
 NETFLIX_CLIP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "netflix.npz")
+# Kill switch: `touch` this file to skip the baked clip and fall back to the drawn
+# animation -- instant revert if the clip misbehaves on the display, no restart needed.
+NETFLIX_CLIP_DISABLE_FILE = "/tmp/dotty_disable_netflix_clip"
 
 def load_clip(path):
     """Load a baked 1-bit clip. Returns (frames(n,H,W) uint8, fps) or None."""
@@ -581,12 +584,17 @@ def main():
                     draw_hours_and_bottom(hh, mm, DISPLAY_INVERTED)
                     publish_state("time")
                 elif cmd_norm == "netflix":
-                    clip = load_clip(NETFLIX_CLIP_PATH)
+                    if os.path.exists(NETFLIX_CLIP_DISABLE_FILE):
+                        log.info("Baked clip disabled via %s; using drawn animation", NETFLIX_CLIP_DISABLE_FILE)
+                        clip = None
+                    else:
+                        clip = load_clip(NETFLIX_CLIP_PATH)
+                        if clip is None:
+                            log.info("No baked clip at %s; using drawn animation", NETFLIX_CLIP_PATH)
                     if clip is not None:
                         frames, fps = clip
                         play_clip(panels, frames, fps, refresh_fn=refresh)
                     else:
-                        log.info("No baked clip at %s; using drawn animation", NETFLIX_CLIP_PATH)
                         display_netflix_logo(panels, refresh_fn=refresh)
                     publish_state("netflix")
                 else:
