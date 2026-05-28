@@ -28,7 +28,10 @@ def download(url, dst_dir):
     import yt_dlp
     out = os.path.join(dst_dir, "src.%(ext)s")
     opts = {
-        "format": "bestvideo[ext=mp4]/best[ext=mp4]/best",
+        # Prefer H.264 (avc1); never AV1 -- OpenCV/ffmpeg often can't decode av01
+        # (fails with "No frames decoded"), and AV1 software decode is painful on a Pi.
+        "format": ("bestvideo[vcodec^=avc1]/best[vcodec^=avc1]/"
+                   "bestvideo[ext=mp4][vcodec!*=av01]/best[ext=mp4][vcodec!*=av01]/best"),
         "outtmpl": out,
         "quiet": True,
         "noplaylist": True,
