@@ -438,11 +438,20 @@ def random_reveal_buffer(pan, refresh_fn, target_buf, delay=0.01):
 # Netflix splash logo
 # ---------------------------
 # Geometry of the Netflix 'N' on the 28x28 grid (white/lit on a black field).
-NETFLIX_TOP = 3
-NETFLIX_BOTTOM = 24          # vertical extent of the legs (inclusive)
-NETFLIX_BAR_W = 3
-NETFLIX_LEFT_X0 = 6          # left leg starts here
+# Tuned to read like the brand mark: tall, bold legs with a dominant diagonal.
+NETFLIX_TOP = 2
+NETFLIX_BOTTOM = 25          # vertical extent of the legs (inclusive)
+NETFLIX_BAR_W = 4            # vertical leg thickness
+NETFLIX_DIAG_W = 6          # diagonal is the boldest stroke
+NETFLIX_LEFT_X0 = 5          # left leg starts here
 NETFLIX_RIGHT_X0 = WIDTH - NETFLIX_BAR_W - NETFLIX_LEFT_X0  # symmetric right leg -> 19
+
+def _netflix_diag_x0(i, span):
+    """Left edge of the diagonal run at step i, centered between the two legs."""
+    cl = NETFLIX_LEFT_X0 + NETFLIX_BAR_W / 2.0
+    cr = NETFLIX_RIGHT_X0 + NETFLIX_BAR_W / 2.0
+    cx = cl + (cr - cl) * (i / span)
+    return int(round(cx - NETFLIX_DIAG_W / 2.0))
 
 def netflix_logo_buffer():
     """Final 28x28 frame of the Netflix 'N': lit (white) strokes on a dark field."""
@@ -453,8 +462,8 @@ def netflix_logo_buffer():
     buf[top:bottom + 1, rx:rx + bar_w] = 1
     span = bottom - top
     for i, y in enumerate(range(top, bottom + 1)):
-        x0 = int(round(lx + (rx - lx) * (i / span)))
-        buf[y, x0:x0 + bar_w] = 1
+        x0 = max(0, _netflix_diag_x0(i, span))
+        buf[y, x0:x0 + NETFLIX_DIAG_W] = 1
     return buf
 
 def display_netflix_logo(pan, refresh_fn=refresh, step_delay: float = 0.03):
@@ -474,23 +483,23 @@ def display_netflix_logo(pan, refresh_fn=refresh, step_delay: float = 0.03):
     if refresh_fn:
         refresh_fn()
 
-    def light_row(y, x0):
-        for x in range(x0, x0 + bar_w):
-            pan.draw(x, y, 1)
+    def light_row(y, x0, width):
+        for x in range(x0, x0 + width):
+            if 0 <= x < WIDTH:
+                pan.draw(x, y, 1)
         if refresh_fn:
             refresh_fn()
         time.sleep(step_delay)
 
     # 1) left leg rises (bottom -> top)
     for y in range(bottom, top - 1, -1):
-        light_row(y, lx)
+        light_row(y, lx, bar_w)
     # 2) diagonal sweeps (top -> bottom)
     for i, y in enumerate(range(top, bottom + 1)):
-        x0 = int(round(lx + (rx - lx) * (i / span)))
-        light_row(y, x0)
+        light_row(y, _netflix_diag_x0(i, span), NETFLIX_DIAG_W)
     # 3) right leg rises (bottom -> top)
     for y in range(bottom, top - 1, -1):
-        light_row(y, rx)
+        light_row(y, rx, bar_w)
 
 # Baked clip produced by tools/make_netflix_clip.py (white-on-black 1-bit frames).
 NETFLIX_CLIP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "netflix.npz")
@@ -589,6 +598,12 @@ def main():
                         log.info("No baked clip at %s; using drawn animation", NETFLIX_CLIP_PATH)
                         display_netflix_logo(panels, refresh_fn=refresh)
                     publish_state("netflix")
+                    # Play once, hold so the logo registers, then return to the clock.
+                    time.sleep(2.5)
+                    hh, mm, _ = get_time()
+                    draw_hours_and_bottom(hh, mm, DISPLAY_INVERTED)
+                    last_hour, last_min = hh, mm
+                    publish_state("time")
                 else:
                     log.info("Unknown command: %s", cmd)
 
