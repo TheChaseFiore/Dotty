@@ -521,6 +521,19 @@ def sparkle_invert(pan, refresh_fn=refresh, per_pixel_delay: float = 0.01):
     h, m, _ = get_time()
     draw_hours_and_bottom(h, m, DISPLAY_INVERTED)
 
+def show_netflix_logo_still(pan, refresh_fn=refresh, hold: float = 1.0):
+    """Snap to the crisp geometric 'N' and hold, resolving the baked shimmer
+    clip into a clean logo (the 1-bit footage keys the logo too raggedly)."""
+    if pan is None:
+        return
+    buf = netflix_logo_buffer()
+    for y in range(HEIGHT):
+        for x in range(WIDTH):
+            pan.draw(x, y, int(buf[y, x]))
+    if refresh_fn:
+        refresh_fn()
+    time.sleep(hold)
+
 # Baked clip produced by tools/make_netflix_clip.py (white-on-black 1-bit frames).
 NETFLIX_CLIP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "netflix.npz")
 # Kill switch: `touch` this file to skip the baked clip and fall back to the drawn
@@ -623,6 +636,7 @@ def main():
                     if clip is not None:
                         frames, fps = clip
                         play_clip(panels, frames, fps, refresh_fn=refresh)
+                        show_netflix_logo_still(panels, refresh_fn=refresh)
                     else:
                         display_netflix_logo(panels, refresh_fn=refresh)
                     publish_state("netflix")
